@@ -1,41 +1,30 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
+	"flag"
 	"log"
 	"os"
 
+	"github.com/BurntSushi/toml"
 	"github.com/pion/webrtc/v3"
 )
 
-const signalingUrl = "wss://ayame-labo.shiguredo.app/signaling"
-const signalingKey = ""
-const roomIdPrefix = "binzume-rdp-room-"
-const roomName = ""
+type Config struct {
+	SignalingUrl string
+	SignalingKey string
+	RoomIdPrefix string
 
-var fileHander = &FileHandler{Fs: os.DirFS("..")}
-
-func HandleMessage(msg webrtc.DataChannelMessage) *FileOperationResult {
-	var result *FileOperationResult
-	if msg.IsString {
-		var op FileOperation
-		_ = json.Unmarshal(msg.Data, &op)
-		data, err := fileHander.HanldeFileOp(&op)
-		if err != nil {
-			result = &FileOperationResult{RID: op.RID, Data: data, Error: fmt.Sprint(err)}
-		} else if data != nil {
-			result = &FileOperationResult{RID: op.RID, Data: data}
-		}
-	} else {
-		log.Println("TODO: binary message")
-	}
-	return result
+	RoomName  string
+	LocalPath string
 }
 
-func InitFileHandler(d *webrtc.DataChannel) {
+const defaultSignalingUrl = "wss://ayame-labo.shiguredo.app/signaling"
+const defaultSignalingKey = "VV69g7Ngx-vNwNknLhxJPHs9FpRWWNWeUzJ9FUyylkD_yc_F"
+const defaultRoomIdPrefix = "binzume@rdp-room-"
+
+func InitFileHandler(d *webrtc.DataChannel, handler *FileHandler) {
 	d.OnMessage(func(msg webrtc.DataChannelMessage) {
-		res := HandleMessage(msg)
+		res := handler.HandleMessage(msg.Data, msg.IsString)
 		if res != nil {
 			b, _ := res.ToBytes()
 			if res.IsBinary() {
@@ -47,18 +36,45 @@ func InitFileHandler(d *webrtc.DataChannel) {
 	})
 }
 
-func main() {
+func loadConfig(confPath string) *Config {
+	var config Config
+	config.SignalingUrl = defaultSignalingUrl
+	config.SignalingKey = defaultSignalingKey
+	config.RoomIdPrefix = defaultRoomIdPrefix
 
-	conn, err := Connect(signalingUrl, roomIdPrefix+roomName, signalingKey)
+	_, err := toml.DecodeFile(confPath, &config)
+	if err != nil {
+		log.Print("failed to load conf", confPath, err)
+	}
+	return &config
+}
+
+func main() {
+	confPath := flag.String("conf", "config.toml", "conf path")
+	roomName := flag.String("room", "", "Ayame room name")
+	localPath := flag.String("path", ".", "local path to share")
+	flag.Parse()
+
+	config := loadConfig(*confPath)
+	if *localPath != "" {
+		config.LocalPath = *localPath
+	}
+	if *roomName != "" {
+		config.RoomName = *roomName
+	}
+
+	var fileHander = &FileHandler{Fs: os.DirFS(config.LocalPath)}
+
+	conn, err := Connect(config.SignalingUrl, config.RoomIdPrefix+config.RoomName, config.SignalingKey)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer conn.Close()
 
-	config := webrtc.Configuration{}
+	rtcConfig := webrtc.Configuration{}
 	for _, iceServer := range conn.AuthResult.IceServers {
 		log.Println(iceServer.URLs, *iceServer.Credential, *iceServer.UserName)
-		config.ICEServers = append(config.ICEServers, webrtc.ICEServer{
+		rtcConfig.ICEServers = append(rtcConfig.ICEServers, webrtc.ICEServer{
 			URLs:       iceServer.URLs,
 			Username:   *iceServer.UserName,
 			Credential: *iceServer.Credential,
@@ -66,7 +82,7 @@ func main() {
 	}
 
 	log.Println("start")
-	peerConnection, err := webrtc.NewPeerConnection(config)
+	peerConnection, err := webrtc.NewPeerConnection(rtcConfig)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -88,7 +104,7 @@ func main() {
 		log.Printf("New DataChannel %s %d\n", d.Label(), d.ID())
 		if d.Label() == "fileServer" {
 			log.Printf("Start file server!")
-			InitFileHandler(d)
+			InitFileHandler(d, fileHander)
 		}
 	})
 	log.Println("ok")

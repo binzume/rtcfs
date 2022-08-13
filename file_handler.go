@@ -92,6 +92,24 @@ func fixPath(path string) string {
 	return path
 }
 
+func (h *FileHandler) HandleMessage(data []byte, isString bool) *FileOperationResult {
+	var result *FileOperationResult
+	if isString {
+		var op FileOperation
+		_ = json.Unmarshal(data, &op)
+		data, err := h.HanldeFileOp(&op)
+		if err != nil {
+			result = &FileOperationResult{RID: op.RID, Data: data, Error: fmt.Sprint(err)}
+		} else if data != nil {
+			result = &FileOperationResult{RID: op.RID, Data: data}
+		}
+	} else {
+		rid := binary.LittleEndian.Uint32(data[4:8])
+		result = &FileOperationResult{RID: rid, Error: fmt.Sprint("TODO: support binary message")}
+	}
+	return result
+}
+
 func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
 	switch op.Op {
 	case "stat":
