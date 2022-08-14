@@ -34,12 +34,9 @@ type FileEntry struct {
 	Name        string `json:"name"`
 	Size        int64  `json:"size"`
 	UpdatedTime int64  `json:"updatedTime"`
+	Writable    bool   `json:"writable,omitempty"`
 
 	Metadata map[string]interface{} `json:"metadata"`
-}
-
-type RemoveFS interface {
-	Remove(path string) error
 }
 
 const BinaryMessageResponseType = 0
@@ -62,20 +59,21 @@ func (r *FileOperationResult) ToBytes() ([]byte, error) {
 }
 
 type FileHandler struct {
-	Fs fs.FS
+	fsys FS
 }
 
-func NewFileHandler(f fs.FS) *FileHandler {
-	return &FileHandler{Fs: f}
+func NewFileHandler(fsys fs.FS) *FileHandler {
+	return &FileHandler{fsys: WrapFS(fsys)}
 }
 
-func NewFileEntry(info os.FileInfo) *FileEntry {
+func NewFileEntry(info os.FileInfo, fswritable bool) *FileEntry {
 	f := &FileEntry{Name: info.Name(), Size: info.Size(), UpdatedTime: info.ModTime().UnixMilli()}
 	if info.IsDir() {
 		f.Type = "directory"
 	} else {
 		f.Type = mime.TypeByExtension(path.Ext(f.Name))
 	}
+	f.Writable = fswritable && info.Mode().Perm()&(1<<(uint(7))) != 0
 	if DefaultThumbnailer.Supported(f.Type) {
 		f.Metadata = map[string]interface{}{
 			"thumbnail": ThumbnailSuffix,
@@ -113,20 +111,20 @@ func (h *FileHandler) HandleMessage(data []byte, isString bool) *FileOperationRe
 func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
 	switch op.Op {
 	case "stat":
-		stat, err := fs.Stat(h.Fs, fixPath(op.Path))
+		stat, err := h.fsys.Stat(fixPath(op.Path))
 		if err != nil {
 			return nil, err
 		}
-		return NewFileEntry(stat), nil
+		return NewFileEntry(stat, h.fsys.Capability().Write), nil
 	case "files":
-		entries, err := fs.ReadDir(h.Fs, fixPath(op.Path))
+		entries, err := fs.ReadDir(h.fsys, fixPath(op.Path))
 		if err != nil {
 			return nil, err
 		}
 		var files []*FileEntry
 		for _, ent := range entries {
 			info, _ := ent.Info()
-			files = append(files, NewFileEntry(info))
+			files = append(files, NewFileEntry(info, h.fsys.Capability().Write))
 		}
 		return files, nil
 	case "read":
@@ -134,7 +132,7 @@ func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
 			srcPath := strings.TrimSuffix(op.Path, ThumbnailSuffix)
 			typ := mime.TypeByExtension(path.Ext(srcPath))
 			log.Println(fixPath(srcPath), typ)
-			thumb := DefaultThumbnailer.GetThumbnail(context.TODO(), h.Fs, fixPath(srcPath), typ, nil)
+			thumb := DefaultThumbnailer.GetThumbnail(context.TODO(), h.fsys, fixPath(srcPath), typ, nil)
 			if thumb == nil {
 				return nil, fmt.Errorf("not found")
 			}
@@ -151,23 +149,33 @@ func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
 			}
 			return buf, nil
 		}
-		f, err := h.Fs.Open(fixPath(op.Path))
+		f, err := h.fsys.Open(fixPath(op.Path))
 		if err != nil {
 			return nil, err
 		}
 		defer f.Close()
-		f.(io.ReadSeeker).Seek(op.Pos, 0) // TODO
+		f.(io.Seeker).Seek(op.Pos, 0) // TODO
 		buf := make([]byte, op.Len)
-		io.ReadFull(f, buf)
+		_, err = io.ReadFull(f, buf)
+		if err != nil {
+			return nil, err
+		}
+		return buf, nil
+	case "write":
+		f, err := h.fsys.OpenWriter(fixPath(op.Path))
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		f.(io.Seeker).Seek(op.Pos, 0) // TODO
+		buf := make([]byte, op.Len)
+		_, err = f.Write(buf)
 		if err != nil {
 			return nil, err
 		}
 		return buf, nil
 	case "remove":
-		if fs, ok := h.Fs.(RemoveFS); ok {
-			return fs.Remove(fixPath(op.Path)) == nil, nil
-		}
-		return nil, fmt.Errorf("Unsupported operation")
+		return h.fsys.Remove(fixPath(op.Path)) == nil, nil
 	}
 	return nil, nil
 }
