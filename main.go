@@ -57,7 +57,7 @@ func loadConfig(confPath string) *Config {
 }
 
 func Start(config *Config) error {
-	var fileHander = &FileHandler{Fs: os.DirFS(config.LocalPath)}
+	var fileHander = NewFileHandler(os.DirFS(config.LocalPath))
 
 	conn, err := Connect(config.SignalingUrl, config.RoomIdPrefix+config.RoomName, config.SignalingKey)
 	if err != nil {

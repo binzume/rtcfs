@@ -29,18 +29,18 @@ type Thumbnail struct {
 	Path string
 }
 
-type Tumbnailer interface {
+type Thumbnailer interface {
 	Supported(typ string) bool
 	GetThumbnail(ctx context.Context, f fs.FS, path, typ string, opt any) *Thumbnail
 }
 
-var DefaultThumbnailer = TumbnailerGroup{}
+var DefaultThumbnailer = ThumbnailerGroup{}
 
-type TumbnailerGroup struct {
-	Thumbnailers []Tumbnailer
+type ThumbnailerGroup struct {
+	Thumbnailers []Thumbnailer
 }
 
-func (g TumbnailerGroup) Supported(typ string) bool {
+func (g ThumbnailerGroup) Supported(typ string) bool {
 	for _, t := range g.Thumbnailers {
 		if t.Supported(typ) {
 			return true
@@ -49,7 +49,7 @@ func (g TumbnailerGroup) Supported(typ string) bool {
 	return false
 }
 
-func (g TumbnailerGroup) GetThumbnail(ctx context.Context, f fs.FS, path, typ string, opt any) *Thumbnail {
+func (g ThumbnailerGroup) GetThumbnail(ctx context.Context, f fs.FS, path, typ string, opt any) *Thumbnail {
 	for _, t := range g.Thumbnailers {
 		if t.Supported(typ) {
 			return t.GetThumbnail(ctx, f, path, typ, opt)
@@ -58,7 +58,7 @@ func (g TumbnailerGroup) GetThumbnail(ctx context.Context, f fs.FS, path, typ st
 	return nil
 }
 
-func (g *TumbnailerGroup) Register(t Tumbnailer) {
+func (g *ThumbnailerGroup) Register(t Thumbnailer) {
 	g.Thumbnailers = append(g.Thumbnailers, t)
 }
 
@@ -110,7 +110,6 @@ func (t *CachedThumbnailer) prepare(id string) bool {
 }
 
 func (t *CachedThumbnailer) finish(id string, thumb *Thumbnail) {
-	log.Println(t)
 	t.locker.Lock()
 	defer t.locker.Unlock()
 	delete(t.generating, id)
