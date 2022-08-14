@@ -17,6 +17,9 @@ type Config struct {
 
 	RoomName  string
 	LocalPath string
+
+	ThumbnailCacheDir string
+	FFmpegPath        string
 }
 
 const defaultSignalingUrl = "wss://ayame-labo.shiguredo.app/signaling"
@@ -42,6 +45,7 @@ func loadConfig(confPath string) *Config {
 	config.SignalingUrl = defaultSignalingUrl
 	config.SignalingKey = defaultSignalingKey
 	config.RoomIdPrefix = defaultRoomIdPrefix
+	config.ThumbnailCacheDir = "cache"
 
 	_, err := toml.DecodeFile(confPath, &config)
 	if errors.Is(err, os.ErrNotExist) {
@@ -177,6 +181,13 @@ func main() {
 	}
 	if *roomName != "" {
 		config.RoomName = *roomName
+	}
+
+	if config.ThumbnailCacheDir != "" {
+		DefaultThumbnailer.Register(NewImageThumbnailer(config.ThumbnailCacheDir))
+		if config.FFmpegPath != "" {
+			DefaultThumbnailer.Register(NewVideoThumbnailer(config.ThumbnailCacheDir, config.FFmpegPath))
+		}
 	}
 
 	for {

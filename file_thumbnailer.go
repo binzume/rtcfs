@@ -58,6 +58,10 @@ func (g TumbnailerGroup) GetThumbnail(ctx context.Context, f fs.FS, path, typ st
 	return nil
 }
 
+func (g *TumbnailerGroup) Register(t Tumbnailer) {
+	g.Thumbnailers = append(g.Thumbnailers, t)
+}
+
 type CachedThumbnailer struct {
 	CacheDir      string
 	SupportedFunc func(typ string) bool
@@ -83,6 +87,8 @@ func (t *CachedThumbnailer) GetThumbnail(ctx context.Context, f fs.FS, src, typ 
 	if !t.prepare(cacheID) {
 		return nil // TODO
 	}
+
+	os.MkdirAll(t.CacheDir, os.ModePerm)
 
 	err := t.GenerateFunc(ctx, f, src, cachePath)
 	if err != nil {
