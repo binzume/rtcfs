@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"log"
 	"os"
@@ -43,37 +44,25 @@ func loadConfig(confPath string) *Config {
 	config.RoomIdPrefix = defaultRoomIdPrefix
 
 	_, err := toml.DecodeFile(confPath, &config)
-	if err != nil {
-		log.Print("failed to load conf", confPath, err)
+	if errors.Is(err, os.ErrNotExist) {
+		log.Printf("WARN: %s not found. use default settings.\n", confPath)
+	} else if err != nil {
+		log.Print("Failed to load ", confPath, err)
 	}
 	return &config
 }
 
-func main() {
-	confPath := flag.String("conf", "config.toml", "conf path")
-	roomName := flag.String("room", "", "Ayame room name")
-	localPath := flag.String("path", ".", "local path to share")
-	flag.Parse()
-
-	config := loadConfig(*confPath)
-	if *localPath != "" {
-		config.LocalPath = *localPath
-	}
-	if *roomName != "" {
-		config.RoomName = *roomName
-	}
-
+func Start(config *Config) error {
 	var fileHander = &FileHandler{Fs: os.DirFS(config.LocalPath)}
 
 	conn, err := Connect(config.SignalingUrl, config.RoomIdPrefix+config.RoomName, config.SignalingKey)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer conn.Close()
 
 	rtcConfig := webrtc.Configuration{}
 	for _, iceServer := range conn.AuthResult.IceServers {
-		log.Println(iceServer.URLs, *iceServer.Credential, *iceServer.UserName)
 		rtcConfig.ICEServers = append(rtcConfig.ICEServers, webrtc.ICEServer{
 			URLs:       iceServer.URLs,
 			Username:   *iceServer.UserName,
@@ -81,10 +70,9 @@ func main() {
 		})
 	}
 
-	log.Println("start")
 	peerConnection, err := webrtc.NewPeerConnection(rtcConfig)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer func() {
 		if cErr := peerConnection.Close(); cErr != nil {
@@ -107,13 +95,12 @@ func main() {
 			InitFileHandler(d, fileHander)
 		}
 	})
-	log.Println("ok")
 
 	go func() {
 		for msg := range conn.Msg {
 			switch msg.Type {
 			case "candidate":
-				cand := webrtc.ICECandidateInit{Candidate: msg.ICE.Candidate}
+				cand := webrtc.ICECandidateInit{Candidate: msg.ICE.Candidate, SDPMid: msg.ICE.SdpMid}
 				if err := peerConnection.AddICECandidate(cand); err != nil {
 					log.Fatal(err)
 				}
@@ -132,9 +119,9 @@ func main() {
 				}
 				conn.Answer(answer.SDP)
 			case "answer":
-				desc := webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: msg.SDP}
+				desc := webrtc.SessionDescription{Type: webrtc.SDPTypePranswer, SDP: msg.SDP}
 				if err := peerConnection.SetRemoteDescription(desc); err != nil {
-					log.Fatal(err)
+					log.Println(err)
 				}
 			default:
 				log.Println("Unknown message:", msg.Type)
@@ -143,8 +130,22 @@ func main() {
 	}()
 
 	if conn.AuthResult.IsExistClient {
+		// Trickle ICE
+		peerConnection.OnICECandidate(func(c *webrtc.ICECandidate) {
+			if c == nil {
+				return
+			}
+			cand := c.ToJSON()
+			conn.Candidate(cand.Candidate, cand.SDPMid, cand.SDPMLineIndex)
+		})
+
+		// TODO
+		peerConnection.CreateDataChannel("fileServer", nil)
+
 		offer, _ := peerConnection.CreateOffer(nil)
-		peerConnection.SetLocalDescription(offer)
+		if err := peerConnection.SetLocalDescription(offer); err != nil {
+			log.Fatal(err)
+		}
 		conn.Offer(offer.SDP)
 	}
 
@@ -159,5 +160,30 @@ func main() {
 	<-conn.Done()
 	if conn.LastError != nil {
 		log.Println(conn.LastError)
+	}
+
+	return conn.LastError
+}
+
+func main() {
+	confPath := flag.String("conf", "config.toml", "conf path")
+	roomName := flag.String("room", "", "Ayame room name")
+	localPath := flag.String("path", ".", "local path to share")
+	flag.Parse()
+
+	config := loadConfig(*confPath)
+	if *localPath != "" {
+		config.LocalPath = *localPath
+	}
+	if *roomName != "" {
+		config.RoomName = *roomName
+	}
+
+	for {
+		err := Start(config)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 	}
 }

@@ -1,7 +1,11 @@
 package main
 
+type EmptyMessage struct {
+	Type string `json:"type"`
+}
+
 type RegisterMessage struct {
-	Type          string      `json:"type"`
+	Type          string      `json:"type"` // register
 	RoomID        string      `json:"roomId"`
 	ClientID      string      `json:"clientId,omitempty"`
 	AuthnMetadata interface{} `json:"authnMetadata,omitempty"`
@@ -23,17 +27,13 @@ type IceServer struct {
 }
 
 type SignalingMessage struct {
-	Type string `json:"type"`
-	SDP  string `json:"sdp"` // offer, answer
-	ICE  struct {
-		Candidate string `json:"candidate"` // candidate
-	}
+	Type string        `json:"type"`          // offer, answer, candidate
+	SDP  string        `json:"sdp,omitempty"` // offer, answer
+	ICE  *ICECandidate `json:"ice,omitempty"` // candidate
 }
 
-type PongMessage struct {
-	Type string `json:"type"`
-}
-
-type ByeMessage struct {
-	Type string `json:"type"`
+type ICECandidate struct {
+	Candidate     string  `json:"candidate"`
+	SdpMid        *string `json:"sdpMid,omitempty"`
+	SdpMLineIndex *uint16 `json:"sdpMLineIndex,omitempty"`
 }

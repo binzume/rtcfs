@@ -14,9 +14,11 @@ type AyameClient struct {
 	AuthResult *AuthResultMessage
 	LastError  error
 
-	ws     *websocket.Conn
-	closed atomic.Bool
-	done   chan struct{}
+	ws         *websocket.Conn
+	closed     atomic.Bool
+	ready      atomic.Bool
+	done       chan struct{}
+	candidates []*ICECandidate
 }
 
 func Connect(wsurl string, roomID string, signalingKey string) (*AyameClient, error) {
@@ -46,7 +48,7 @@ func ConnectWithWs(ws *websocket.Conn, roomID string, signalingKey string) (*Aya
 	}
 
 	done := make(chan struct{})
-	msgCh := make(chan *SignalingMessage, 16)
+	msgCh := make(chan *SignalingMessage, 32)
 	conn := &AyameClient{ws: ws, done: done, Msg: msgCh, AuthResult: &authResult}
 
 	go func() {
@@ -58,22 +60,37 @@ func ConnectWithWs(ws *websocket.Conn, roomID string, signalingKey string) (*Aya
 				conn.LastError = err
 				return
 			}
-			if msg.Type == "ping" {
-				err := ws.WriteJSON(&PongMessage{Type: "pong"})
+			select {
+			case <-done:
+				return
+			default:
+			}
+			switch msg.Type {
+			case "ping":
+				err := ws.WriteJSON(&EmptyMessage{Type: "pong"})
 				if err != nil {
 					conn.LastError = err
 					return
 				}
-				continue
-			} else if msg.Type == "bye" {
+			case "pong":
+			case "bye":
 				return
+			case "offer", "answer", "candidate":
+				select {
+				case <-done:
+					return
+				case msgCh <- &msg:
+				case <-time.After(200 * time.Millisecond):
+					log.Println("msg timeout", msg.Type)
+				}
+			default:
+				log.Println("unknown message type:", msg.Type)
 			}
-			select {
-			case <-done:
-				return
-			case msgCh <- &msg:
-			case <-time.After(10 * time.Millisecond):
-				log.Println("timeout", msg.Type)
+			if msg.Type == "answer" {
+				conn.ready.Store(true)
+				for _, cand := range conn.candidates {
+					ws.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
+				}
 			}
 		}
 	}()
@@ -82,17 +99,21 @@ func ConnectWithWs(ws *websocket.Conn, roomID string, signalingKey string) (*Aya
 }
 
 func (c *AyameClient) Answer(sdp string) error {
-	return c.ws.WriteJSON(&SignalingMessage{
-		Type: "answer",
-		SDP:  sdp,
-	})
+	return c.ws.WriteJSON(&SignalingMessage{Type: "answer", SDP: sdp})
 }
 
 func (c *AyameClient) Offer(sdp string) error {
-	return c.ws.WriteJSON(&SignalingMessage{
-		Type: "offer",
-		SDP:  sdp,
-	})
+	return c.ws.WriteJSON(&SignalingMessage{Type: "offer", SDP: sdp})
+}
+
+func (c *AyameClient) Candidate(candidate string, id *string, index *uint16) error {
+	cand := &ICECandidate{Candidate: candidate, SdpMid: id, SdpMLineIndex: index}
+	if !c.ready.Load() {
+		c.candidates = append(c.candidates, cand)
+		return nil
+	}
+	return c.ws.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
+
 }
 
 func (c *AyameClient) Done() <-chan struct{} {
@@ -106,7 +127,6 @@ func (c *AyameClient) Close() {
 	close(c.done)
 	c.ws.Close()
 	c.ws = nil
-
 }
 
 // WSUpgrader for upgrading http request in handle request
