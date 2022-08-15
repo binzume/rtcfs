@@ -38,7 +38,7 @@ type FileEntry struct {
 	UpdatedTime int64  `json:"updatedTime"`
 	Writable    bool   `json:"writable,omitempty"`
 
-	Metadata map[string]interface{} `json:"metadata"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 const BinaryMessageResponseType = 0
@@ -154,9 +154,9 @@ func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
 		if strings.HasSuffix(op.Path, ThumbnailSuffix) {
 			srcPath := strings.TrimSuffix(op.Path, ThumbnailSuffix)
 			typ := mime.TypeByExtension(path.Ext(srcPath))
-			thumb := DefaultThumbnailer.GetThumbnail(context.TODO(), h.fsys, fixPath(srcPath), typ, nil)
-			if thumb == nil {
-				return nil, errors.New("not found")
+			thumb, err := DefaultThumbnailer.GetThumbnail(context.TODO(), h.fsys, fixPath(srcPath), typ, nil)
+			if err != nil {
+				return nil, err
 			}
 			f, err := os.Open(thumb.Path)
 			if err != nil {

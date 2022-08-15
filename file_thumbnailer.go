@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
@@ -31,10 +33,14 @@ type Thumbnail struct {
 
 type Thumbnailer interface {
 	Supported(typ string) bool
-	GetThumbnail(ctx context.Context, f fs.FS, path, typ string, opt any) *Thumbnail
+	GetThumbnail(ctx context.Context, f fs.FS, path, typ string, opt any) (*Thumbnail, error)
 }
 
+var ErrNotSupported = errors.New("Not supported format")
+
 var DefaultThumbnailer = ThumbnailerGroup{}
+
+const ThumbnailWidth = 160
 
 type ThumbnailerGroup struct {
 	Thumbnailers []Thumbnailer
@@ -49,17 +55,45 @@ func (g ThumbnailerGroup) Supported(typ string) bool {
 	return false
 }
 
-func (g ThumbnailerGroup) GetThumbnail(ctx context.Context, f fs.FS, path, typ string, opt any) *Thumbnail {
+func (g ThumbnailerGroup) GetThumbnail(ctx context.Context, f fs.FS, path, typ string, opt any) (*Thumbnail, error) {
 	for _, t := range g.Thumbnailers {
 		if t.Supported(typ) {
-			return t.GetThumbnail(ctx, f, path, typ, opt)
+			thumb, err := t.GetThumbnail(ctx, f, path, typ, opt)
+			if err != ErrNotSupported {
+				return thumb, err // succeeded or unexpected error
+			}
 		}
 	}
-	return nil
+	return nil, ErrNotSupported
 }
 
 func (g *ThumbnailerGroup) Register(t Thumbnailer) {
 	g.Thumbnailers = append(g.Thumbnailers, t)
+}
+
+type promise[T any] struct {
+	complete chan struct{}
+	value    T
+	err      error
+}
+
+func NewPromise[T any]() *promise[T] {
+	return &promise[T]{complete: make(chan struct{})}
+}
+
+func (c *promise[T]) Resolve(value T, err error) {
+	c.value = value
+	c.err = err
+	close(c.complete)
+}
+
+func (c *promise[T]) Wait(ctx context.Context) (T, error) {
+	select {
+	case <-c.complete:
+		return c.value, c.err
+	case <-ctx.Done():
+		return c.value, ctx.Err()
+	}
 }
 
 type CachedThumbnailer struct {
@@ -67,53 +101,54 @@ type CachedThumbnailer struct {
 	SupportedFunc func(typ string) bool
 	GenerateFunc  func(ctx context.Context, f fs.FS, src, dst string) error
 	locker        sync.Mutex
-	generating    map[string]bool
+	generating    map[string]*promise[*Thumbnail] // TODO: cache state
 }
 
 func (t *CachedThumbnailer) Supported(typ string) bool {
 	return t.SupportedFunc(typ)
 }
 
-func (t *CachedThumbnailer) GetThumbnail(ctx context.Context, f fs.FS, src, typ string, opt any) *Thumbnail {
+func (t *CachedThumbnailer) GetThumbnail(ctx context.Context, f fs.FS, src, typ string, opt any) (*Thumbnail, error) {
 	sum := sha1.Sum([]byte(src))
 	cacheID := hex.EncodeToString(sum[:])
 	cachePath := path.Join(t.CacheDir, cacheID+".jpeg")
 	thumb := &Thumbnail{Path: cachePath, Type: "image/jpeg"}
 
 	if _, err := os.Stat(cachePath); err == nil {
-		return thumb
+		return thumb, nil
 	}
 
-	if !t.prepare(cacheID) {
-		return nil // TODO
+	for task, exists := t.prepare(cacheID); exists; task, exists = t.prepare(cacheID) {
+		thumb, err := task.Wait(ctx)
+		if err == nil {
+			return thumb, nil
+		}
 	}
 
 	os.MkdirAll(t.CacheDir, os.ModePerm)
 
 	err := t.GenerateFunc(ctx, f, src, cachePath)
-	if err != nil {
-		return nil
-	}
-	t.finish(cacheID, thumb)
-
-	return thumb
+	t.finish(cacheID, thumb, err)
+	return thumb, err
 }
 
-func (t *CachedThumbnailer) prepare(id string) bool {
+func (t *CachedThumbnailer) prepare(id string) (*promise[*Thumbnail], bool) {
 	t.locker.Lock()
 	defer t.locker.Unlock()
-	if t.generating[id] {
-		return false
+	if task, ok := t.generating[id]; ok {
+		return task, true
 	}
-	t.generating[id] = true
-	return true
+	t.generating[id] = NewPromise[*Thumbnail]()
+	return t.generating[id], false
 }
 
-func (t *CachedThumbnailer) finish(id string, thumb *Thumbnail) {
+func (t *CachedThumbnailer) finish(id string, thumb *Thumbnail, err error) {
 	t.locker.Lock()
 	defer t.locker.Unlock()
-	delete(t.generating, id)
-	// TODO
+	if task, ok := t.generating[id]; ok {
+		delete(t.generating, id)
+		task.Resolve(thumb, err)
+	}
 }
 
 func NewImageThumbnailer(cacheDir string) *CachedThumbnailer {
@@ -121,7 +156,7 @@ func NewImageThumbnailer(cacheDir string) *CachedThumbnailer {
 		CacheDir:      cacheDir,
 		SupportedFunc: isSupportedImage,
 		GenerateFunc:  makeImageThumbnail,
-		generating:    map[string]bool{},
+		generating:    map[string]*promise[*Thumbnail]{},
 	}
 }
 
@@ -138,7 +173,7 @@ func makeImageThumbnail(ctx context.Context, f fs.FS, src, out string) error {
 	if err != nil {
 		return err
 	}
-	timg := resize.Resize(160, 0, img, resize.Lanczos3)
+	timg := resize.Resize(ThumbnailWidth, 0, img, resize.Lanczos3)
 
 	thumb, err := os.Create(out)
 	if err != nil {
@@ -170,7 +205,8 @@ func makeVideoThumbnail(ctx context.Context, f fs.FS, in, out string, ffmpegPath
 	if rpr, ok := f.(RealPathResolver); ok {
 		in = rpr.RealPath(in)
 	}
-	args := []string{"-ss", "3", "-i", in, "-vframes", "1", "-vcodec", "mjpeg", "-an", "-vf", "scale=200:-1", out}
+	scaleOpt := fmt.Sprintf("scale=%d:-1", ThumbnailWidth)
+	args := []string{"-ss", "3", "-i", in, "-vframes", "1", "-vcodec", "mjpeg", "-an", "-vf", scaleOpt, out}
 	if strings.HasPrefix(in, "https://") || strings.HasPrefix(in, "http://") {
 		// To prevent hostname resolving issue
 		if parsedURL, err := url.Parse(in); err == nil {
@@ -193,10 +229,10 @@ func makeVideoThumbnail(ctx context.Context, f fs.FS, in, out string, ffmpegPath
 	_, err2 := os.Stat(out)
 	if err == nil && err2 != nil {
 		log.Println("RETRY ", ffmpegPath, "-i", in, "-vframes", "1",
-			"-vcodec", "mjpeg", "-an", "-vf", "scale=200:-1", out)
+			"-vcodec", "mjpeg", "-an", "-vf", scaleOpt, out)
 		// TODO
 		c := exec.CommandContext(ctx, ffmpegPath, "-i", in, "-vframes", "1",
-			"-vcodec", "mjpeg", "-an", "-vf", "scale=200:-1", out)
+			"-vcodec", "mjpeg", "-an", "-vf", scaleOpt, out)
 		err = c.Start()
 		err = c.Wait()
 	}
