@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pion/webrtc/v3"
+	"golang.org/x/sync/semaphore"
 )
 
 type Config struct {
@@ -20,6 +22,7 @@ type Config struct {
 	SignalingKey        string
 	RoomIdPrefix        string
 	PairingRoomIdPrefix string
+	ParingTimeoutSec    int
 
 	RoomName  string
 	LocalPath string
@@ -33,6 +36,7 @@ func DefaultConfig() *Config {
 	config.SignalingUrl = "wss://ayame-labo.shiguredo.app/signaling"
 	config.SignalingKey = "VV69g7Ngx-vNwNknLhxJPHs9FpRWWNWeUzJ9FUyylkD_yc_F"
 	config.RoomIdPrefix = "binzume@rdp-room-"
+	config.ParingTimeoutSec = 600
 	config.PairingRoomIdPrefix = "binzume@rdp-pin-"
 	config.ThumbnailCacheDir = "cache"
 	return &config
@@ -50,8 +54,10 @@ func loadConfig(confPath string) *Config {
 	return config
 }
 
-func PublishFiles(config *Config) error {
-	rtcConn, err := NewRTCConn(config.SignalingUrl, config.RoomIdPrefix+config.RoomName+".1", config.SignalingKey)
+func PublishFiles(ctx context.Context, config *Config) error {
+	roomID := config.RoomIdPrefix + config.RoomName + ".1"
+	log.Println("waiting for connect: ", roomID)
+	rtcConn, err := NewRTCConn(config.SignalingUrl, roomID, config.SignalingKey)
 	if err != nil {
 		return err
 	}
@@ -60,19 +66,26 @@ func PublishFiles(config *Config) error {
 			log.Printf("cannot close peerConnection: %v\n", err)
 		}
 	}()
+	ctx, done := context.WithCancel(ctx)
+	defer done()
 
-	var fileHander = NewFileHandler(os.DirFS(config.LocalPath))
+	fileHander := NewFileHandler(os.DirFS(config.LocalPath))
+	filesem := semaphore.NewWeighted(8)
 	initFileHandler := func(d *webrtc.DataChannel, handler *FileHandler) {
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-			res := handler.HandleMessage(msg.Data, msg.IsString)
-			if res != nil {
-				b, _ := res.ToBytes()
-				if res.IsBinary() {
-					d.Send(b)
-				} else {
-					d.SendText(string(b))
+			filesem.Acquire(ctx, 1)
+			go func() {
+				defer filesem.Release(1)
+				res := handler.HandleMessage(msg.Data, msg.IsString)
+				if res != nil {
+					b, _ := res.ToBytes()
+					if res.IsBinary() {
+						d.Send(b)
+					} else {
+						d.SendText(string(b))
+					}
 				}
-			}
+			}()
 		})
 	}
 
@@ -91,17 +104,20 @@ func PublishFiles(config *Config) error {
 	}
 
 	rtcConn.Start()
-	return rtcConn.Wait()
+	return rtcConn.Wait(ctx)
 }
 
-func Pairing(config *Config) error {
+func Pairing(ctx context.Context, config *Config) error {
 	pin, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
 		return err
 	}
 	pinstr := fmt.Sprintf("%06d", pin)
-
 	log.Println("PIN: ", pinstr)
+
+	ctx, done := context.WithTimeout(ctx, time.Duration(config.ParingTimeoutSec)*time.Second)
+	defer done()
+
 	rtcConn, err := NewRTCConn(config.SignalingUrl, config.PairingRoomIdPrefix+pinstr, config.SignalingKey)
 	if err != nil {
 		return err
@@ -132,10 +148,9 @@ func Pairing(config *Config) error {
 			})
 		}
 	})
-	// TODO timeout
 
 	rtcConn.Start()
-	return rtcConn.Wait()
+	return rtcConn.Wait(ctx)
 }
 
 func main() {
@@ -152,14 +167,6 @@ func main() {
 		config.RoomName = *roomName
 	}
 
-	if flag.Arg(0) == "pairing" {
-		err := Pairing(config)
-		if err != nil {
-			log.Println(err)
-		}
-		return
-	}
-
 	if config.ThumbnailCacheDir != "" {
 		DefaultThumbnailer.Register(NewImageThumbnailer(config.ThumbnailCacheDir))
 		if config.FFmpegPath != "" {
@@ -167,11 +174,22 @@ func main() {
 		}
 	}
 
-	for {
-		err := PublishFiles(config)
+	switch flag.Arg(0) {
+	case "pairing":
+		err := Pairing(context.Background(), config)
 		if err != nil {
 			log.Println(err)
 		}
-		time.Sleep(5 * time.Second)
+	case "publish", "":
+		for {
+			err := PublishFiles(context.Background(), config)
+			if err != nil {
+				log.Println("ERROR:", err)
+			}
+			time.Sleep(5 * time.Second)
+		}
+	default:
+		fmt.Println("Unknown sub command: ", flag.Arg(0))
+		flag.Usage()
 	}
 }

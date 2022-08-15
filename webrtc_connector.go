@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"github.com/pion/webrtc/v3"
@@ -97,7 +98,11 @@ func (c *RTCConn) Close() error {
 	return c.PC.Close()
 }
 
-func (c *RTCConn) Wait() error {
-	<-c.ayameConn.Done()
-	return c.ayameConn.LastError
+func (c *RTCConn) Wait(ctx context.Context) error {
+	select {
+	case <-c.ayameConn.Done():
+		return c.ayameConn.LastError
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
