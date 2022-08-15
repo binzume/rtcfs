@@ -121,7 +121,15 @@ func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		var files []*FileEntry
+		files := []*FileEntry{}
+		if op.Pos >= int64(len(entries)) {
+			return files, nil
+		}
+		end := int64(len(entries))
+		if op.Len > 0 && op.Pos+int64(op.Len) < end {
+			end = op.Pos + int64(op.Len)
+		}
+		entries = entries[op.Pos:end]
 		for _, ent := range entries {
 			info, _ := ent.Info()
 			files = append(files, NewFileEntry(info, h.fsys.Capability().Write))
