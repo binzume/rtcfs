@@ -43,16 +43,16 @@ func (c *RTCConn) Start() {
 		}
 	})
 
-	if c.ayameConn.AuthResult.IsExistClient {
-		// Trickle ICE
-		c.PC.OnICECandidate(func(ic *webrtc.ICECandidate) {
-			if ic == nil {
-				return
-			}
-			cand := ic.ToJSON()
-			c.ayameConn.Candidate(cand.Candidate, cand.SDPMid, cand.SDPMLineIndex)
-		})
+	// Trickle ICE
+	c.PC.OnICECandidate(func(ic *webrtc.ICECandidate) {
+		if ic == nil {
+			return
+		}
+		cand := ic.ToJSON()
+		c.ayameConn.Candidate(cand.Candidate, cand.SDPMid, cand.SDPMLineIndex)
+	})
 
+	if c.ayameConn.AuthResult.IsExistClient {
 		offer, _ := c.PC.CreateOffer(nil)
 		if err := c.PC.SetLocalDescription(offer); err != nil {
 			log.Fatal(err)
@@ -63,7 +63,7 @@ func (c *RTCConn) Start() {
 		for msg := range c.ayameConn.Msg {
 			switch msg.Type {
 			case "candidate":
-				cand := webrtc.ICECandidateInit{Candidate: msg.ICE.Candidate, SDPMid: msg.ICE.SdpMid}
+				cand := webrtc.ICECandidateInit{Candidate: msg.ICE.Candidate, SDPMid: msg.ICE.SdpMid, SDPMLineIndex: msg.ICE.SdpMLineIndex}
 				if err := c.PC.AddICECandidate(cand); err != nil {
 					log.Fatal(err)
 				}
@@ -82,7 +82,7 @@ func (c *RTCConn) Start() {
 				}
 				c.ayameConn.Answer(answer.SDP)
 			case "answer":
-				desc := webrtc.SessionDescription{Type: webrtc.SDPTypePranswer, SDP: msg.SDP}
+				desc := webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: msg.SDP}
 				if err := c.PC.SetRemoteDescription(desc); err != nil {
 					log.Println(err)
 				}

@@ -101,7 +101,7 @@ func (c *AyameConn) recvLoop(msgCh chan<- *SignalingMessage) {
 		default:
 			log.Println("unknown message type:", msg.Type)
 		}
-		if msg.Type == "answer" {
+		if msg.Type == "answer" || msg.Type == "offer" {
 			c.ready.Store(true)
 			for _, cand := range c.candidates {
 				c.soc.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
