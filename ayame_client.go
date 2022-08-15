@@ -4,133 +4,137 @@ import (
 	"fmt"
 	"log"
 	"sync/atomic"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-type AyameClient struct {
+type AyameConn struct {
 	Msg        <-chan *SignalingMessage
 	AuthResult *AuthResultMessage
 	LastError  error
 
-	ws         *websocket.Conn
+	soc        JsonSocket
 	closed     atomic.Bool
 	ready      atomic.Bool
 	done       chan struct{}
 	candidates []*ICECandidate
 }
 
-func Connect(wsurl string, roomID string, signalingKey string) (*AyameClient, error) {
-	ws, _, err := websocket.DefaultDialer.Dial(wsurl, nil)
+type JsonSocket interface {
+	WriteJSON(v any) error
+	ReadJSON(v any) error
+	Close() error
+}
+
+func Dial(signalingUrl, roomID, signalingKey string) (*AyameConn, error) {
+	ws, _, err := websocket.DefaultDialer.Dial(signalingUrl, nil)
 	if err != nil {
 		return nil, err
 	}
-	return ConnectWithWs(ws, roomID, signalingKey)
+	return StartClient(ws, roomID, signalingKey)
 }
 
-func ConnectWithWs(ws *websocket.Conn, roomID string, signalingKey string) (*AyameClient, error) {
-	err := ws.WriteJSON(&RegisterMessage{
+func StartClient(soc JsonSocket, roomID, signalingKey string) (*AyameConn, error) {
+	done := make(chan struct{})
+	msgCh := make(chan *SignalingMessage, 32)
+	conn := &AyameConn{soc: soc, done: done, Msg: msgCh}
+	if err := conn.handshake(roomID, signalingKey); err != nil {
+		soc.Close()
+		return nil, err
+	}
+	go conn.recvLoop(msgCh)
+	return conn, nil
+}
+
+func (c *AyameConn) handshake(roomID, signalingKey string) error {
+	err := c.soc.WriteJSON(&RegisterMessage{
 		Type:         "register",
 		RoomID:       roomID,
 		SignalingKey: signalingKey,
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var authResult AuthResultMessage
-	err = ws.ReadJSON(&authResult)
+	err = c.soc.ReadJSON(&authResult)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	c.AuthResult = &authResult
 	if authResult.Type != "accept" {
-		return nil, fmt.Errorf("Auth error: %v", authResult)
+		return fmt.Errorf("Auth error: %s", authResult.Reason)
 	}
+	return nil
+}
 
-	done := make(chan struct{})
-	msgCh := make(chan *SignalingMessage, 32)
-	conn := &AyameClient{ws: ws, done: done, Msg: msgCh, AuthResult: &authResult}
-
-	go func() {
-		defer conn.Close()
-		for {
-			var msg SignalingMessage
-			err := ws.ReadJSON(&msg)
+func (c *AyameConn) recvLoop(msgCh chan<- *SignalingMessage) {
+	defer c.Close()
+	defer close(msgCh)
+	for {
+		var msg SignalingMessage
+		err := c.soc.ReadJSON(&msg)
+		if err != nil {
+			c.LastError = err
+			return
+		}
+		select {
+		case <-c.done:
+			return
+		default:
+		}
+		switch msg.Type {
+		case "ping":
+			err := c.soc.WriteJSON(&EmptyMessage{Type: "pong"})
 			if err != nil {
-				conn.LastError = err
+				c.LastError = err
 				return
 			}
+		case "pong":
+		case "bye":
+			return
+		case "offer", "answer", "candidate":
 			select {
-			case <-done:
+			case <-c.done:
 				return
-			default:
+			case msgCh <- &msg:
 			}
-			switch msg.Type {
-			case "ping":
-				err := ws.WriteJSON(&EmptyMessage{Type: "pong"})
-				if err != nil {
-					conn.LastError = err
-					return
-				}
-			case "pong":
-			case "bye":
-				return
-			case "offer", "answer", "candidate":
-				select {
-				case <-done:
-					return
-				case msgCh <- &msg:
-				case <-time.After(200 * time.Millisecond):
-					log.Println("msg timeout", msg.Type)
-				}
-			default:
-				log.Println("unknown message type:", msg.Type)
-			}
-			if msg.Type == "answer" {
-				conn.ready.Store(true)
-				for _, cand := range conn.candidates {
-					ws.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
-				}
+		default:
+			log.Println("unknown message type:", msg.Type)
+		}
+		if msg.Type == "answer" {
+			c.ready.Store(true)
+			for _, cand := range c.candidates {
+				c.soc.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
 			}
 		}
-	}()
-
-	return conn, nil
+	}
 }
 
-func (c *AyameClient) Answer(sdp string) error {
-	return c.ws.WriteJSON(&SignalingMessage{Type: "answer", SDP: sdp})
+func (c *AyameConn) Answer(sdp string) error {
+	return c.soc.WriteJSON(&SignalingMessage{Type: "answer", SDP: sdp})
 }
 
-func (c *AyameClient) Offer(sdp string) error {
-	return c.ws.WriteJSON(&SignalingMessage{Type: "offer", SDP: sdp})
+func (c *AyameConn) Offer(sdp string) error {
+	return c.soc.WriteJSON(&SignalingMessage{Type: "offer", SDP: sdp})
 }
 
-func (c *AyameClient) Candidate(candidate string, id *string, index *uint16) error {
+func (c *AyameConn) Candidate(candidate string, id *string, index *uint16) error {
 	cand := &ICECandidate{Candidate: candidate, SdpMid: id, SdpMLineIndex: index}
 	if !c.ready.Load() {
 		c.candidates = append(c.candidates, cand)
 		return nil
 	}
-	return c.ws.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
-
+	return c.soc.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
 }
 
-func (c *AyameClient) Done() <-chan struct{} {
-	return c.done
-}
-
-func (c *AyameClient) Close() {
+func (c *AyameConn) Close() {
 	if !c.closed.CompareAndSwap(false, true) {
 		return
 	}
 	close(c.done)
-	c.ws.Close()
-	c.ws = nil
+	c.soc.Close()
 }
 
-// WSUpgrader for upgrading http request in handle request
-var WSUpgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+func (c *AyameConn) Done() <-chan struct{} {
+	return c.done
 }
