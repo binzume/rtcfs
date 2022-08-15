@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 )
@@ -33,12 +34,43 @@ type FileOperationResult struct {
 
 type FileEntry struct {
 	Type        string `json:"type"`
-	Name        string `json:"name"`
-	Size        int64  `json:"size"`
+	FileName    string `json:"name"`
+	FileSize    int64  `json:"size"`
 	UpdatedTime int64  `json:"updatedTime"`
 	Writable    bool   `json:"writable,omitempty"`
 
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+func (f *FileEntry) Name() string {
+	return f.FileName
+}
+
+func (f *FileEntry) Size() int64 {
+	return f.FileSize
+}
+
+func (f *FileEntry) IsDir() bool {
+	return f.Type == "directory"
+}
+
+func (f *FileEntry) Mode() fs.FileMode {
+	var mode fs.FileMode = 1 << 8 // readable
+	if f.Writable {
+		mode |= 1 << 7
+	}
+	if f.IsDir() {
+		mode |= fs.ModeDir
+	}
+	return mode
+}
+
+func (f *FileEntry) ModTime() time.Time {
+	return time.UnixMilli(f.UpdatedTime)
+}
+
+func (f *FileEntry) Sys() any {
+	return f
 }
 
 const BinaryMessageResponseType = 0
@@ -74,11 +106,11 @@ func NewFileHandler(fsys fs.FS, parallels int) *FileHandler {
 }
 
 func NewFileEntry(info os.FileInfo, fswritable bool) *FileEntry {
-	f := &FileEntry{Name: info.Name(), Size: info.Size(), UpdatedTime: info.ModTime().UnixMilli()}
+	f := &FileEntry{FileName: info.Name(), FileSize: info.Size(), UpdatedTime: info.ModTime().UnixMilli()}
 	if info.IsDir() {
 		f.Type = "directory"
 	} else {
-		f.Type = mime.TypeByExtension(path.Ext(f.Name))
+		f.Type = mime.TypeByExtension(path.Ext(f.FileName))
 	}
 	f.Writable = fswritable && info.Mode().Perm()&(1<<(uint(7))) != 0
 	if DefaultThumbnailer.Supported(f.Type) {
@@ -97,7 +129,7 @@ func fixPath(path string) string {
 	return path
 }
 
-func (h *FileHandler) HandleMessage(ctx context.Context, data []byte, isstr bool, writer func(*FileOperationResult)) error {
+func (h *FileHandler) HandleMessage(ctx context.Context, data []byte, isstr bool, writer func(*FileOperationResult) error) error {
 	if !isstr {
 		rid := binary.LittleEndian.Uint32(data[4:8])
 		writer(&FileOperationResult{RID: rid, Error: fmt.Sprint("TODO: support binary message")})
@@ -115,9 +147,12 @@ func (h *FileHandler) HandleMessage(ctx context.Context, data []byte, isstr bool
 
 		ret, err := h.HanldeFileOp(&op)
 		if err != nil {
-			writer(&FileOperationResult{RID: op.RID, Data: ret, Error: fmt.Sprint(err)})
-		} else if ret != nil {
-			writer(&FileOperationResult{RID: op.RID, Data: ret})
+			writer(&FileOperationResult{RID: op.RID, Error: fmt.Sprint(err)})
+		} else {
+			err := writer(&FileOperationResult{RID: op.RID, Data: ret})
+			if err != nil {
+				_ = writer(&FileOperationResult{RID: op.RID, Error: fmt.Sprint(err)})
+			}
 		}
 	}()
 	return nil

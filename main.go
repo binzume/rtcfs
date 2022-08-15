@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"math/big"
 	"os"
@@ -69,13 +70,14 @@ func PublishFiles(ctx context.Context, config *Config) error {
 	defer done()
 
 	fileHander := NewFileHandler(os.DirFS(config.LocalPath), 8)
-	initFileHandler := func(d *webrtc.DataChannel, handler *FileHandler) {
+	initDataChannel := func(d *webrtc.DataChannel) {
+		log.Printf("init fileServer channel")
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-			handler.HandleMessage(ctx, msg.Data, msg.IsString, func(res *FileOperationResult) {
+			fileHander.HandleMessage(ctx, msg.Data, msg.IsString, func(res *FileOperationResult) error {
 				if res.IsBinary() {
-					d.Send(res.ToBytes())
+					return d.Send(res.ToBytes())
 				} else {
-					d.SendText(string(res.ToBytes()))
+					return d.SendText(string(res.ToBytes()))
 				}
 			})
 		})
@@ -84,15 +86,65 @@ func PublishFiles(ctx context.Context, config *Config) error {
 	rtcConn.PC.OnDataChannel(func(d *webrtc.DataChannel) {
 		log.Printf("New DataChannel %s %d\n", d.Label(), d.ID())
 		if d.Label() == "fileServer" {
-			log.Printf("Start file server!")
-			initFileHandler(d, fileHander)
+			initDataChannel(d)
 		}
 	})
 
 	// TODO
 	if rtcConn.ayameConn.AuthResult.IsExistClient {
 		d, _ := rtcConn.PC.CreateDataChannel("fileServer", nil)
-		initFileHandler(d, fileHander)
+		initDataChannel(d)
+	}
+
+	rtcConn.Start()
+	return rtcConn.Wait(ctx)
+}
+
+func TraverseForTest(ctx context.Context, config *Config) error {
+	roomID := config.RoomIdPrefix + config.RoomName + ".1"
+	log.Println("waiting for connect: ", roomID)
+	rtcConn, err := NewRTCConn(config.SignalingUrl, roomID, config.SignalingKey)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := rtcConn.Close(); err != nil {
+			log.Printf("cannot close peerConnection: %v\n", err)
+		}
+	}()
+	ctx, done := context.WithCancel(ctx)
+	defer done()
+
+	initDataChannel := func(d *webrtc.DataChannel) {
+		client := NewFileClient(func(req *FileOperation) error {
+			js, _ := json.Marshal(req)
+			return d.SendText(string(js))
+		})
+		d.OnOpen(func() {
+			log.Printf("init fileServer channel(client)")
+			go func() {
+				fs.WalkDir(client, "/", func(path string, d fs.DirEntry, err error) error {
+					log.Println(path)
+					return nil
+				})
+				rtcConn.Close()
+			}()
+		})
+		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+			client.HandleMessage(msg.Data, msg.IsString)
+		})
+	}
+
+	rtcConn.PC.OnDataChannel(func(d *webrtc.DataChannel) {
+		log.Printf("New DataChannel %s %d\n", d.Label(), d.ID())
+		if d.Label() == "fileServer" {
+			initDataChannel(d)
+		}
+	})
+	// TODO
+	if rtcConn.ayameConn.AuthResult.IsExistClient {
+		d, _ := rtcConn.PC.CreateDataChannel("fileServer", nil)
+		initDataChannel(d)
 	}
 
 	rtcConn.Start()
@@ -169,6 +221,11 @@ func main() {
 	switch flag.Arg(0) {
 	case "pairing":
 		err := Pairing(context.Background(), config)
+		if err != nil {
+			log.Println(err)
+		}
+	case "traverse-test":
+		err := TraverseForTest(context.Background(), config)
 		if err != nil {
 			log.Println(err)
 		}
