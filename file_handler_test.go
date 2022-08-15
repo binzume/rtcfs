@@ -7,8 +7,8 @@ import (
 )
 
 func TestFileHandler_files(t *testing.T) {
-	fileHander := NewFileHandler(os.DirFS("."), 1)
-	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "files", Path: "/"})
+	server := NewFSServer(os.DirFS("."), 1)
+	ret, err := server.HanldeFileOp(&FileOperation{Op: "files", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,8 +20,8 @@ func TestFileHandler_files(t *testing.T) {
 }
 
 func TestFileHandler_stat(t *testing.T) {
-	fileHander := NewFileHandler(os.DirFS("."), 1)
-	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "stat", Path: "/LICENSE"})
+	server := NewFSServer(os.DirFS("."), 1)
+	ret, err := server.HanldeFileOp(&FileOperation{Op: "stat", Path: "/LICENSE"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +33,8 @@ func TestFileHandler_stat(t *testing.T) {
 }
 
 func TestFileHandler_read(t *testing.T) {
-	fileHander := NewFileHandler(os.DirFS("."), 1)
-	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "read", Path: "/LICENSE", Pos: 10, Len: 10})
+	server := NewFSServer(os.DirFS("."), 1)
+	ret, err := server.HanldeFileOp(&FileOperation{Op: "read", Path: "/LICENSE", Pos: 10, Len: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,8 +55,8 @@ func (f fakeWritableFs) Remove(path string) error {
 }
 
 func TestFileHandler_remove(t *testing.T) {
-	fileHander := NewFileHandler(&fakeWritableFs{FS: os.DirFS(".")}, 1)
-	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "remove", Path: "/LICENSE"})
+	server := NewFSServer(&fakeWritableFs{FS: os.DirFS(".")}, 1)
+	ret, err := server.HanldeFileOp(&FileOperation{Op: "remove", Path: "/LICENSE"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,9 +68,9 @@ func TestFileHandler_remove(t *testing.T) {
 }
 
 func TestFileHandler_readtthumb(t *testing.T) {
-	fileHander := NewFileHandler(os.DirFS("testdata/"), 1)
+	server := NewFSServer(os.DirFS("testdata/"), 1)
 	DefaultThumbnailer.Thumbnailers = append(DefaultThumbnailer.Thumbnailers, NewImageThumbnailer("cache"))
-	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "read", Path: "test.png" + ThumbnailSuffix, Pos: 10, Len: 10})
+	ret, err := server.HanldeFileOp(&FileOperation{Op: "read", Path: "test.png" + ThumbnailSuffix, Pos: 10, Len: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -96,13 +96,13 @@ func (r *FileOperationResult) ToBytes() []byte {
 	return b
 }
 
-type FileHandler struct {
+type FSServer struct {
 	fsys FS
 	sem  *semaphore.Weighted
 }
 
-func NewFileHandler(fsys fs.FS, parallels int) *FileHandler {
-	return &FileHandler{fsys: WrapFS(fsys), sem: semaphore.NewWeighted(int64(parallels))}
+func NewFSServer(fsys fs.FS, parallels int) *FSServer {
+	return &FSServer{fsys: WrapFS(fsys), sem: semaphore.NewWeighted(int64(parallels))}
 }
 
 func NewFileEntry(info os.FileInfo, fswritable bool) *FileEntry {
@@ -129,8 +129,8 @@ func fixPath(path string) string {
 	return path
 }
 
-func (h *FileHandler) HandleMessage(ctx context.Context, data []byte, isstr bool, writer func(*FileOperationResult) error) error {
-	if !isstr {
+func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, writer func(*FileOperationResult) error) error {
+	if !isjson {
 		rid := binary.LittleEndian.Uint32(data[4:8])
 		writer(&FileOperationResult{RID: rid, Error: fmt.Sprint("TODO: support binary message")})
 		return errors.New("not implemented")
@@ -158,7 +158,7 @@ func (h *FileHandler) HandleMessage(ctx context.Context, data []byte, isstr bool
 	return nil
 }
 
-func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
+func (h *FSServer) HanldeFileOp(op *FileOperation) (any, error) {
 	switch op.Op {
 	case "stat":
 		stat, err := h.fsys.Stat(fixPath(op.Path))

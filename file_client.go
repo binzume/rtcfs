@@ -9,18 +9,19 @@ import (
 	"sync"
 )
 
-type FileClient struct {
+// FSClient implements fs.FS
+type FSClient struct {
 	sendFunc func(req *FileOperation) error
 	seq      uint32
 	locker   sync.Mutex
 	wait     map[uint32]chan *FileOperationResult
 }
 
-func NewFileClient(sendFunc func(res *FileOperation) error) *FileClient {
-	return &FileClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}}
+func NewFSClient(sendFunc func(res *FileOperation) error) *FSClient {
+	return &FSClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}}
 }
 
-func (c *FileClient) request(req *FileOperation) (*FileOperationResult, error) {
+func (c *FSClient) request(req *FileOperation) (*FileOperationResult, error) {
 	resCh := make(chan *FileOperationResult)
 
 	c.locker.Lock()
@@ -43,9 +44,9 @@ func (c *FileClient) request(req *FileOperation) (*FileOperationResult, error) {
 	return res, nil
 }
 
-func (c *FileClient) HandleMessage(data []byte, isstr bool) error {
+func (c *FSClient) HandleMessage(data []byte, isjson bool) error {
 	var res FileOperationResult
-	if isstr {
+	if isjson {
 		if err := json.Unmarshal(data, &res); err != nil {
 			return err
 		}
@@ -79,7 +80,7 @@ func (f *clientDirEnt) Info() (fs.FileInfo, error) {
 }
 
 type clientFile struct {
-	c    *FileClient
+	c    *FSClient
 	name string
 	pos  int64
 }
@@ -113,11 +114,11 @@ func (f *clientFile) Close() error {
 	return nil
 }
 
-func (c *FileClient) Open(name string) (fs.File, error) {
+func (c *FSClient) Open(name string) (fs.File, error) {
 	return &clientFile{c: c, name: name}, nil
 }
 
-func (c *FileClient) ReadDir(name string) ([]fs.DirEntry, error) {
+func (c *FSClient) ReadDir(name string) ([]fs.DirEntry, error) {
 	res, err := c.request(&FileOperation{Op: "files", Path: name, Len: 500})
 	if err != nil {
 		return nil, err

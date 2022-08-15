@@ -69,7 +69,7 @@ func PublishFiles(ctx context.Context, config *Config) error {
 	ctx, done := context.WithCancel(ctx)
 	defer done()
 
-	fileHander := NewFileHandler(os.DirFS(config.LocalPath), 8)
+	fileHander := NewFSServer(os.DirFS(config.LocalPath), 8)
 	initDataChannel := func(d *webrtc.DataChannel) {
 		log.Printf("init fileServer channel")
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -116,7 +116,7 @@ func TraverseForTest(ctx context.Context, config *Config) error {
 	defer done()
 
 	initDataChannel := func(d *webrtc.DataChannel) {
-		client := NewFileClient(func(req *FileOperation) error {
+		client := NewFSClient(func(req *FileOperation) error {
 			js, _ := json.Marshal(req)
 			return d.SendText(string(js))
 		})
