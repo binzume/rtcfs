@@ -21,7 +21,7 @@ type Config struct {
 	SignalingKey        string
 	RoomIdPrefix        string
 	PairingRoomIdPrefix string
-	ParingTimeoutSec    int
+	PairingTimeoutSec   int
 
 	RoomName  string
 	LocalPath string
@@ -35,8 +35,8 @@ func DefaultConfig() *Config {
 	config.SignalingUrl = "wss://ayame-labo.shiguredo.app/signaling"
 	config.SignalingKey = "VV69g7Ngx-vNwNknLhxJPHs9FpRWWNWeUzJ9FUyylkD_yc_F"
 	config.RoomIdPrefix = "binzume@rdp-room-"
-	config.ParingTimeoutSec = 600
 	config.PairingRoomIdPrefix = "binzume@rdp-pin-"
+	config.PairingTimeoutSec = 600
 	config.ThumbnailCacheDir = "cache"
 	return &config
 }
@@ -107,7 +107,7 @@ func Pairing(ctx context.Context, config *Config) error {
 	pinstr := fmt.Sprintf("%06d", pin)
 	log.Println("PIN: ", pinstr)
 
-	ctx, done := context.WithTimeout(ctx, time.Duration(config.ParingTimeoutSec)*time.Second)
+	ctx, done := context.WithTimeout(ctx, time.Duration(config.PairingTimeoutSec)*time.Second)
 	defer done()
 
 	rtcConn, err := NewRTCConn(config.SignalingUrl, config.PairingRoomIdPrefix+pinstr, config.SignalingKey)

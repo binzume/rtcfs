@@ -7,7 +7,7 @@ import (
 )
 
 func TestFileHandler_files(t *testing.T) {
-	fileHander := NewFileHandler(os.DirFS("."))
+	fileHander := NewFileHandler(os.DirFS("."), 1)
 	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "files", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +20,7 @@ func TestFileHandler_files(t *testing.T) {
 }
 
 func TestFileHandler_stat(t *testing.T) {
-	fileHander := NewFileHandler(os.DirFS("."))
+	fileHander := NewFileHandler(os.DirFS("."), 1)
 	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "stat", Path: "/LICENSE"})
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestFileHandler_stat(t *testing.T) {
 }
 
 func TestFileHandler_read(t *testing.T) {
-	fileHander := NewFileHandler(os.DirFS("."))
+	fileHander := NewFileHandler(os.DirFS("."), 1)
 	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "read", Path: "/LICENSE", Pos: 10, Len: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func (f fakeWritableFs) Remove(path string) error {
 }
 
 func TestFileHandler_remove(t *testing.T) {
-	fileHander := NewFileHandler(&fakeWritableFs{FS: os.DirFS(".")})
+	fileHander := NewFileHandler(&fakeWritableFs{FS: os.DirFS(".")}, 1)
 	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "remove", Path: "/LICENSE"})
 	if err != nil {
 		t.Fatal(err)
