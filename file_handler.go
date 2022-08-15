@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -11,6 +12,8 @@ import (
 	"os"
 	"path"
 	"strings"
+
+	"golang.org/x/sync/semaphore"
 )
 
 type FileOperation struct {
@@ -46,23 +49,28 @@ func (r *FileOperationResult) IsBinary() bool {
 	return ok
 }
 
-func (r *FileOperationResult) ToBytes() ([]byte, error) {
+func (r *FileOperationResult) ToBytes() []byte {
 	if data, ok := r.Data.([]byte); ok {
 		var b []byte
 		b = binary.LittleEndian.AppendUint32(b, uint32(BinaryMessageResponseType))
 		b = binary.LittleEndian.AppendUint32(b, uint32(r.RID.(float64))) // TODO
 		b = append(b, data...)
-		return b, nil
+		return b
 	}
-	return json.Marshal(r)
+	b, err := json.Marshal(r)
+	if err != nil {
+		panic(err) // bug
+	}
+	return b
 }
 
 type FileHandler struct {
 	fsys FS
+	sem  *semaphore.Weighted
 }
 
-func NewFileHandler(fsys fs.FS) *FileHandler {
-	return &FileHandler{fsys: WrapFS(fsys)}
+func NewFileHandler(fsys fs.FS, parallels int) *FileHandler {
+	return &FileHandler{fsys: WrapFS(fsys), sem: semaphore.NewWeighted(int64(parallels))}
 }
 
 func NewFileEntry(info os.FileInfo, fswritable bool) *FileEntry {
@@ -89,22 +97,30 @@ func fixPath(path string) string {
 	return path
 }
 
-func (h *FileHandler) HandleMessage(data []byte, isString bool) *FileOperationResult {
-	var result *FileOperationResult
-	if isString {
-		var op FileOperation
-		_ = json.Unmarshal(data, &op)
-		data, err := h.HanldeFileOp(&op)
-		if err != nil {
-			result = &FileOperationResult{RID: op.RID, Data: data, Error: fmt.Sprint(err)}
-		} else if data != nil {
-			result = &FileOperationResult{RID: op.RID, Data: data}
-		}
-	} else {
+func (h *FileHandler) HandleMessage(ctx context.Context, data []byte, isstr bool, writer func(*FileOperationResult)) error {
+	if !isstr {
 		rid := binary.LittleEndian.Uint32(data[4:8])
-		result = &FileOperationResult{RID: rid, Error: fmt.Sprint("TODO: support binary message")}
+		writer(&FileOperationResult{RID: rid, Error: fmt.Sprint("TODO: support binary message")})
+		return errors.New("not implemented")
 	}
-	return result
+
+	var op FileOperation
+	err := json.Unmarshal(data, &op)
+	if err != nil {
+		return err
+	}
+	h.sem.Acquire(ctx, 1)
+	go func() {
+		defer h.sem.Release(1)
+
+		ret, err := h.HanldeFileOp(&op)
+		if err != nil {
+			writer(&FileOperationResult{RID: op.RID, Data: ret, Error: fmt.Sprint(err)})
+		} else if ret != nil {
+			writer(&FileOperationResult{RID: op.RID, Data: ret})
+		}
+	}()
+	return nil
 }
 
 func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
@@ -140,7 +156,7 @@ func (h *FileHandler) HanldeFileOp(op *FileOperation) (any, error) {
 			typ := mime.TypeByExtension(path.Ext(srcPath))
 			thumb := DefaultThumbnailer.GetThumbnail(context.TODO(), h.fsys, fixPath(srcPath), typ, nil)
 			if thumb == nil {
-				return nil, fmt.Errorf("not found")
+				return nil, errors.New("not found")
 			}
 			f, err := os.Open(thumb.Path)
 			if err != nil {

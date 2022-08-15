@@ -14,7 +14,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pion/webrtc/v3"
-	"golang.org/x/sync/semaphore"
 )
 
 type Config struct {
@@ -69,23 +68,16 @@ func PublishFiles(ctx context.Context, config *Config) error {
 	ctx, done := context.WithCancel(ctx)
 	defer done()
 
-	fileHander := NewFileHandler(os.DirFS(config.LocalPath))
-	filesem := semaphore.NewWeighted(8)
+	fileHander := NewFileHandler(os.DirFS(config.LocalPath), 8)
 	initFileHandler := func(d *webrtc.DataChannel, handler *FileHandler) {
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-			filesem.Acquire(ctx, 1)
-			go func() {
-				defer filesem.Release(1)
-				res := handler.HandleMessage(msg.Data, msg.IsString)
-				if res != nil {
-					b, _ := res.ToBytes()
-					if res.IsBinary() {
-						d.Send(b)
-					} else {
-						d.SendText(string(b))
-					}
+			handler.HandleMessage(ctx, msg.Data, msg.IsString, func(res *FileOperationResult) {
+				if res.IsBinary() {
+					d.Send(res.ToBytes())
+				} else {
+					d.SendText(string(res.ToBytes()))
 				}
-			}()
+			})
 		})
 	}
 

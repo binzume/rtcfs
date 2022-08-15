@@ -68,7 +68,7 @@ func TestFileHandler_remove(t *testing.T) {
 }
 
 func TestFileHandler_readtthumb(t *testing.T) {
-	fileHander := NewFileHandler(os.DirFS("testdata/"))
+	fileHander := NewFileHandler(os.DirFS("testdata/"), 1)
 	DefaultThumbnailer.Thumbnailers = append(DefaultThumbnailer.Thumbnailers, NewImageThumbnailer("cache"))
 	ret, err := fileHander.HanldeFileOp(&FileOperation{Op: "read", Path: "test.png" + ThumbnailSuffix, Pos: 10, Len: 10})
 	if err != nil {
