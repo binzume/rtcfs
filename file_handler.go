@@ -17,7 +17,7 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-type FileOperation struct {
+type FileOperationRequest struct {
 	Op   string `json:"op"`
 	RID  any    `json:"rid,omitempty"`
 	Path string `json:"path,omitempty"`
@@ -27,9 +27,10 @@ type FileOperation struct {
 }
 
 type FileOperationResult struct {
-	RID   any    `json:"rid,omitempty"`
-	Data  any    `json:"data,omitempty"`
-	Error string `json:"error,omitempty"`
+	RID     any             `json:"rid,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+	Error   string          `json:"error,omitempty"`
+	binData []byte
 }
 
 type FileEntry struct {
@@ -60,7 +61,7 @@ func (f *FileEntry) Mode() fs.FileMode {
 		mode |= 1 << 7
 	}
 	if f.IsDir() {
-		mode |= fs.ModeDir
+		mode |= fs.ModeDir | 1<<6
 	}
 	return mode
 }
@@ -76,17 +77,24 @@ func (f *FileEntry) Sys() any {
 const BinaryMessageResponseType = 0
 const ThumbnailSuffix = "#thumbnail.jpeg"
 
-func (r *FileOperationResult) IsBinary() bool {
-	_, ok := r.Data.([]byte)
-	return ok
+func (r *FileOperationRequest) ToBytes() []byte {
+	b, err := json.Marshal(r)
+	if err != nil {
+		panic(err) // bug
+	}
+	return b
+}
+
+func (r *FileOperationResult) IsJSON() bool {
+	return r.binData == nil
 }
 
 func (r *FileOperationResult) ToBytes() []byte {
-	if data, ok := r.Data.([]byte); ok {
+	if !r.IsJSON() {
 		var b []byte
 		b = binary.LittleEndian.AppendUint32(b, uint32(BinaryMessageResponseType))
 		b = binary.LittleEndian.AppendUint32(b, uint32(r.RID.(float64))) // TODO
-		b = append(b, data...)
+		b = append(b, r.binData...)
 		return b
 	}
 	b, err := json.Marshal(r)
@@ -136,7 +144,7 @@ func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, 
 		return errors.New("not implemented")
 	}
 
-	var op FileOperation
+	var op FileOperationRequest
 	err := json.Unmarshal(data, &op)
 	if err != nil {
 		return err
@@ -149,7 +157,12 @@ func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, 
 		if err != nil {
 			writer(&FileOperationResult{RID: op.RID, Error: fmt.Sprint(err)})
 		} else {
-			err := writer(&FileOperationResult{RID: op.RID, Data: ret})
+			if bindata, ok := ret.([]byte); ok {
+				err = writer(&FileOperationResult{RID: op.RID, binData: bindata})
+			} else {
+				jsonData, _ := json.Marshal(ret)
+				err = writer(&FileOperationResult{RID: op.RID, Data: jsonData})
+			}
 			if err != nil {
 				_ = writer(&FileOperationResult{RID: op.RID, Error: fmt.Sprint(err)})
 			}
@@ -158,7 +171,31 @@ func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, 
 	return nil
 }
 
-func (h *FSServer) HanldeFileOp(op *FileOperation) (any, error) {
+func (h *FSServer) readThumbnail(srcPath string, pos int64, len int) ([]byte, error) {
+	typ := mime.TypeByExtension(path.Ext(srcPath))
+	thumb, err := DefaultThumbnailer.GetThumbnail(context.TODO(), h.fsys, srcPath, typ, nil)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(thumb.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if pos > 0 {
+		if _, err = f.Seek(pos, 0); err != nil {
+			return nil, err
+		}
+	}
+	buf := make([]byte, len)
+
+	if _, err = io.ReadFull(f, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 	switch op.Op {
 	case "stat":
 		stat, err := h.fsys.Stat(fixPath(op.Path))
@@ -187,44 +224,33 @@ func (h *FSServer) HanldeFileOp(op *FileOperation) (any, error) {
 		return files, nil
 	case "read":
 		if strings.HasSuffix(op.Path, ThumbnailSuffix) {
-			srcPath := strings.TrimSuffix(op.Path, ThumbnailSuffix)
-			typ := mime.TypeByExtension(path.Ext(srcPath))
-			thumb, err := DefaultThumbnailer.GetThumbnail(context.TODO(), h.fsys, fixPath(srcPath), typ, nil)
-			if err != nil {
-				return nil, err
-			}
-			f, err := os.Open(thumb.Path)
-			if err != nil {
-				return nil, err
-			}
-			defer f.Close()
-			f.Seek(op.Pos, 0)
-			buf := make([]byte, op.Len)
-			io.ReadFull(f, buf)
-			if err != nil {
-				return nil, err
-			}
-			return buf, nil
+			return h.readThumbnail(fixPath(strings.TrimSuffix(op.Path, ThumbnailSuffix)), op.Pos, op.Len)
 		}
 		f, err := h.fsys.Open(fixPath(op.Path))
 		if err != nil {
 			return nil, err
 		}
 		defer f.Close()
-		f.(io.Seeker).Seek(op.Pos, 0) // TODO
+		if op.Pos > 0 {
+			f.(io.Seeker).Seek(op.Pos, 0) // TODO
+		}
+
 		buf := make([]byte, op.Len)
-		_, err = io.ReadFull(f, buf)
-		if err != nil {
+
+		n, err := io.ReadFull(f, buf)
+		if err != nil && (n == 0 || err != io.ErrUnexpectedEOF) {
 			return nil, err
 		}
-		return buf, nil
+		return buf[:n], nil
 	case "write":
 		f, err := h.fsys.OpenWriter(fixPath(op.Path))
 		if err != nil {
 			return nil, err
 		}
 		defer f.Close()
-		f.(io.Seeker).Seek(op.Pos, 0) // TODO
+		if op.Pos > 0 {
+			f.(io.Seeker).Seek(op.Pos, 0) // TODO
+		}
 		buf := make([]byte, op.Len)
 		_, err = f.Write(buf)
 		if err != nil {

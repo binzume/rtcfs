@@ -8,7 +8,7 @@ import (
 
 func TestFileHandler_files(t *testing.T) {
 	server := NewFSServer(os.DirFS("."), 1)
-	ret, err := server.HanldeFileOp(&FileOperation{Op: "files", Path: "/"})
+	ret, err := server.HanldeFileOp(&FileOperationRequest{Op: "files", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestFileHandler_files(t *testing.T) {
 
 func TestFileHandler_stat(t *testing.T) {
 	server := NewFSServer(os.DirFS("."), 1)
-	ret, err := server.HanldeFileOp(&FileOperation{Op: "stat", Path: "/LICENSE"})
+	ret, err := server.HanldeFileOp(&FileOperationRequest{Op: "stat", Path: "/LICENSE"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestFileHandler_stat(t *testing.T) {
 
 func TestFileHandler_read(t *testing.T) {
 	server := NewFSServer(os.DirFS("."), 1)
-	ret, err := server.HanldeFileOp(&FileOperation{Op: "read", Path: "/LICENSE", Pos: 10, Len: 10})
+	ret, err := server.HanldeFileOp(&FileOperationRequest{Op: "read", Path: "/LICENSE", Pos: 10, Len: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func (f fakeWritableFs) Remove(path string) error {
 
 func TestFileHandler_remove(t *testing.T) {
 	server := NewFSServer(&fakeWritableFs{FS: os.DirFS(".")}, 1)
-	ret, err := server.HanldeFileOp(&FileOperation{Op: "remove", Path: "/LICENSE"})
+	ret, err := server.HanldeFileOp(&FileOperationRequest{Op: "remove", Path: "/LICENSE"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestFileHandler_remove(t *testing.T) {
 func TestFileHandler_readtthumb(t *testing.T) {
 	server := NewFSServer(os.DirFS("testdata/"), 1)
 	DefaultThumbnailer.Thumbnailers = append(DefaultThumbnailer.Thumbnailers, NewImageThumbnailer("cache"))
-	ret, err := server.HanldeFileOp(&FileOperation{Op: "read", Path: "test.png" + ThumbnailSuffix, Pos: 10, Len: 10})
+	ret, err := server.HanldeFileOp(&FileOperationRequest{Op: "read", Path: "test.png" + ThumbnailSuffix, Pos: 10, Len: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

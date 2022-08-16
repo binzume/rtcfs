@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"sync"
@@ -11,23 +12,24 @@ import (
 
 // FSClient implements fs.FS
 type FSClient struct {
-	sendFunc func(req *FileOperation) error
-	seq      uint32
-	locker   sync.Mutex
-	wait     map[uint32]chan *FileOperationResult
+	sendFunc    func(req *FileOperationRequest) error
+	reqCount    uint32
+	MaxReadSize int
+	wait        map[uint32]chan *FileOperationResult
+	locker      sync.Mutex
 }
 
-func NewFSClient(sendFunc func(res *FileOperation) error) *FSClient {
-	return &FSClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}}
+func NewFSClient(sendFunc func(req *FileOperationRequest) error) *FSClient {
+	return &FSClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}, MaxReadSize: 48000}
 }
 
-func (c *FSClient) request(req *FileOperation) (*FileOperationResult, error) {
-	resCh := make(chan *FileOperationResult)
+func (c *FSClient) request(req *FileOperationRequest) (*FileOperationResult, error) {
+	resCh := make(chan *FileOperationResult, 1)
 
 	c.locker.Lock()
-	c.seq++
-	c.wait[c.seq] = resCh
-	req.RID = c.seq
+	c.reqCount++
+	c.wait[c.reqCount] = resCh
+	req.RID = c.reqCount
 	c.locker.Unlock()
 
 	err := c.sendFunc(req)
@@ -39,7 +41,17 @@ func (c *FSClient) request(req *FileOperation) (*FileOperationResult, error) {
 		return nil, os.ErrClosed
 	}
 	if res.Error != "" {
-		return nil, errors.New(res.Error)
+		// TODO: more errors
+		switch res.Error {
+		case "unexpected EOF":
+			return nil, io.ErrUnexpectedEOF
+		case "EOF":
+			return nil, io.EOF
+		case "file does not exist":
+			return nil, fs.ErrNotExist
+		default:
+			return nil, errors.New(res.Error)
+		}
 	}
 	return res, nil
 }
@@ -55,7 +67,7 @@ func (c *FSClient) HandleMessage(data []byte, isjson bool) error {
 			return errors.New("invalid binary msssage type")
 		}
 		res.RID = float64(binary.LittleEndian.Uint32(data[4:]))
-		res.Data = data[8:]
+		res.binData = data[8:]
 	}
 	rid := uint32(res.RID.(float64))
 	c.locker.Lock()
@@ -65,6 +77,41 @@ func (c *FSClient) HandleMessage(data []byte, isjson bool) error {
 	}
 	c.locker.Unlock()
 	return nil
+}
+
+// fs.FS
+func (c *FSClient) Open(name string) (fs.File, error) {
+	return &clientFile{c: c, name: name}, nil
+}
+
+// fs.StatFS
+func (c *FSClient) Stat(name string) (fs.FileInfo, error) {
+	res, err := c.request(&FileOperationRequest{Op: "stat", Path: name})
+	if err != nil {
+		return nil, err
+	}
+	var result FileEntry
+	json.Unmarshal(res.Data, &result)
+	return &result, nil
+}
+
+// fs.ReadDirFS
+func (c *FSClient) ReadDir(name string) ([]fs.DirEntry, error) {
+	return c.ReadDirRange(name, 0, -1)
+}
+
+func (c *FSClient) ReadDirRange(name string, pos, limit int) ([]fs.DirEntry, error) {
+	res, err := c.request(&FileOperationRequest{Op: "files", Path: name, Pos: int64(pos), Len: limit})
+	if err != nil {
+		return nil, err
+	}
+	var result []*FileEntry
+	json.Unmarshal(res.Data, &result)
+	var entries []fs.DirEntry
+	for _, f := range result {
+		entries = append(entries, &clientDirEnt{FileEntry: f})
+	}
+	return entries, nil
 }
 
 type clientDirEnt struct {
@@ -86,50 +133,41 @@ type clientFile struct {
 }
 
 func (f *clientFile) Stat() (fs.FileInfo, error) {
-	res, err := f.c.request(&FileOperation{Op: "stat", Path: f.name})
-	if err != nil {
-		return nil, err
-	}
-	// TODO: json.RawMessage...
-	bytes, _ := json.Marshal(res.Data)
-	var result FileEntry
-	json.Unmarshal(bytes, &result)
-	return &result, nil
+	return f.c.Stat(f.name)
 }
 
 func (f *clientFile) Read(b []byte) (int, error) {
 	sz := len(b)
-	if sz > 48000 {
-		sz = 48000
+	if sz > f.c.MaxReadSize {
+		sz = f.c.MaxReadSize
 	}
-	res, err := f.c.request(&FileOperation{Op: "read", Path: f.name, Pos: f.pos, Len: sz})
+	res, err := f.c.request(&FileOperationRequest{Op: "read", Path: f.name, Pos: f.pos, Len: sz})
 	if err != nil {
 		return 0, err
 	}
-	l := copy(b, res.Data.([]byte))
+	l := copy(b, res.binData)
 	f.pos += int64(l)
 	return l, nil
 }
+
 func (f *clientFile) Close() error {
 	return nil
 }
 
-func (c *FSClient) Open(name string) (fs.File, error) {
-	return &clientFile{c: c, name: name}, nil
+// fs.ReadDirFile
+func (f *clientFile) ReadDir(n int) ([]fs.DirEntry, error) {
+	entries, err := f.c.ReadDirRange(f.name, int(f.pos), n)
+	f.pos += int64(len(entries))
+	return entries, err
 }
 
-func (c *FSClient) ReadDir(name string) ([]fs.DirEntry, error) {
-	res, err := c.request(&FileOperation{Op: "files", Path: name, Len: 500})
-	if err != nil {
-		return nil, err
+// Abort all requests
+func (c *FSClient) Abort() error {
+	c.locker.Lock()
+	defer c.locker.Unlock()
+	for _, ch := range c.wait {
+		close(ch)
 	}
-	// TODO: json.RawMessage...
-	bytes, _ := json.Marshal(res.Data)
-	var result []*FileEntry
-	json.Unmarshal(bytes, &result)
-	var entries []fs.DirEntry
-	for _, f := range result {
-		entries = append(entries, &clientDirEnt{FileEntry: f})
-	}
-	return entries, nil
+	c.wait = map[uint32]chan *FileOperationResult{}
+	return nil
 }

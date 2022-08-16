@@ -14,12 +14,11 @@ type FSCapability struct {
 }
 
 type FS interface {
-	fs.FS
+	fs.StatFS
 	Capability() FSCapability
 	OpenWriter(path string) (io.WriteCloser, error)
 	Create(path string) (io.WriteCloser, error)
 	Remove(path string) error
-	Stat(name string) (fs.FileInfo, error)
 }
 
 type wrappedFS struct {

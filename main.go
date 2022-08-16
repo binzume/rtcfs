@@ -74,10 +74,10 @@ func PublishFiles(ctx context.Context, config *Config) error {
 		log.Printf("init fileServer channel")
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
 			fileHander.HandleMessage(ctx, msg.Data, msg.IsString, func(res *FileOperationResult) error {
-				if res.IsBinary() {
-					return d.Send(res.ToBytes())
-				} else {
+				if res.IsJSON() {
 					return d.SendText(string(res.ToBytes()))
+				} else {
+					return d.Send(res.ToBytes())
 				}
 			})
 		})
@@ -116,9 +116,8 @@ func TraverseForTest(ctx context.Context, config *Config) error {
 	defer done()
 
 	initDataChannel := func(d *webrtc.DataChannel) {
-		client := NewFSClient(func(req *FileOperation) error {
-			js, _ := json.Marshal(req)
-			return d.SendText(string(js))
+		client := NewFSClient(func(req *FileOperationRequest) error {
+			return d.SendText(string(req.ToBytes()))
 		})
 		d.OnOpen(func() {
 			log.Printf("init fileServer channel(client)")
