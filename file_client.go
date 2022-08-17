@@ -142,12 +142,12 @@ func (f *clientFile) Read(b []byte) (int, error) {
 		sz = f.c.MaxReadSize
 	}
 	res, err := f.c.request(&FileOperationRequest{Op: "read", Path: f.name, Pos: f.pos, Len: sz})
-	if err != nil {
-		return 0, err
-	}
 	l := copy(b, res.binData)
 	f.pos += int64(l)
-	return l, nil
+	if err == nil && l < sz {
+		err = io.EOF
+	}
+	return l, err
 }
 
 func (f *clientFile) Close() error {

@@ -187,12 +187,13 @@ func (h *FSServer) readThumbnail(srcPath string, pos int64, len int) ([]byte, er
 			return nil, err
 		}
 	}
-	buf := make([]byte, len)
 
-	if _, err = io.ReadFull(f, buf); err != nil {
+	buf := make([]byte, len)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && (n == 0 || err != io.ErrUnexpectedEOF) {
 		return nil, err
 	}
-	return buf, nil
+	return buf[:n], nil
 }
 
 func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
@@ -236,7 +237,6 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 		}
 
 		buf := make([]byte, op.Len)
-
 		n, err := io.ReadFull(f, buf)
 		if err != nil && (n == 0 || err != io.ErrUnexpectedEOF) {
 			return nil, err
