@@ -16,16 +16,22 @@ go install github.com/binzume/rtcfs@latest
 ### ペアリング
 
 PINが表示されるのでクライアント側に入力してください．
-仮実装です．roomnameは秘密にする必要があるので適当なランダムっぽい名前にしてください．
+仮実装です．RoomNameは秘密にする必要があるので適当なランダムっぽい名前にしてください．
 
 ```bash
-rtcfs -name roomname pairing
+rtcfs -room RoomName pairing
 ```
 
 ### ファイルを共有
 
 ```bash
-rtcfs -name roomname -path /dir/to/share
+rtcfs -room RoomName -path /dir/to/share
+```
+
+### ファイルリストを表示(デバッグ用)
+
+```bash
+rtcfs -room RoomName traverse-test
 ```
 
 # License
