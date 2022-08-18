@@ -37,10 +37,11 @@ type FileEntry struct {
 	Type        string `json:"type"`
 	FileName    string `json:"name"`
 	FileSize    int64  `json:"size"`
-	UpdatedTime int64  `json:"updatedTime"`
+	UpdatedTime int64  `json:"updatedTime,omitempty"`
+	CreatedTime int64  `json:"createdTime,omitempty"`
 	Writable    bool   `json:"writable,omitempty"`
 
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 func (f *FileEntry) Name() string {
@@ -72,6 +73,13 @@ func (f *FileEntry) ModTime() time.Time {
 
 func (f *FileEntry) Sys() any {
 	return f
+}
+
+func (f *FileEntry) SetMetaData(key string, value any) {
+	if f.Metadata == nil {
+		f.Metadata = map[string]any{}
+	}
+	f.Metadata[key] = value
 }
 
 const BinaryMessageResponseType = 0
@@ -114,17 +122,22 @@ func NewFSServer(fsys fs.FS, parallels int) *FSServer {
 }
 
 func NewFileEntry(info os.FileInfo, fswritable bool) *FileEntry {
-	f := &FileEntry{FileName: info.Name(), FileSize: info.Size(), UpdatedTime: info.ModTime().UnixMilli()}
+	if ent, ok := info.(*FileEntry); ok {
+		return ent
+	}
+	f := &FileEntry{
+		FileName:    info.Name(),
+		FileSize:    info.Size(),
+		UpdatedTime: info.ModTime().UnixMilli(),
+		Writable:    fswritable && info.Mode().Perm()&(1<<(uint(7))) != 0,
+	}
 	if info.IsDir() {
 		f.Type = "directory"
 	} else {
 		f.Type = mime.TypeByExtension(path.Ext(f.FileName))
 	}
-	f.Writable = fswritable && info.Mode().Perm()&(1<<(uint(7))) != 0
 	if DefaultThumbnailer.Supported(f.Type) {
-		f.Metadata = map[string]interface{}{
-			"thumbnail": ThumbnailSuffix,
-		}
+		f.SetMetaData("thumbnail", ThumbnailSuffix)
 	}
 	return f
 }
@@ -233,7 +246,10 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 		}
 		defer f.Close()
 		if op.Pos > 0 {
-			f.(io.Seeker).Seek(op.Pos, 0) // TODO
+			_, err = f.(io.Seeker).Seek(op.Pos, 0) // TODO
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		buf := make([]byte, op.Len)
@@ -249,7 +265,10 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 		}
 		defer f.Close()
 		if op.Pos > 0 {
-			f.(io.Seeker).Seek(op.Pos, 0) // TODO
+			_, err = f.(io.Seeker).Seek(op.Pos, 0) // TODO
+			if err != nil {
+				return nil, err
+			}
 		}
 		buf := make([]byte, op.Len)
 		_, err = f.Write(buf)
