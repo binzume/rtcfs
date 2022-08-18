@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -25,6 +26,7 @@ type Config struct {
 	PairingTimeoutSec   int
 
 	RoomName  string
+	AuthToken string
 	LocalPath string
 
 	ThumbnailCacheDir string
@@ -57,6 +59,9 @@ func loadConfig(confPath string) *Config {
 func PublishFiles(ctx context.Context, config *Config) error {
 	roomID := config.RoomIdPrefix + config.RoomName + ".1"
 	log.Println("waiting for connect: ", roomID)
+
+	authorized := config.AuthToken == ""
+
 	rtcConn, err := NewRTCConn(config.SignalingUrl, roomID, config.SignalingKey)
 	if err != nil {
 		return err
@@ -66,13 +71,16 @@ func PublishFiles(ctx context.Context, config *Config) error {
 			log.Printf("cannot close peerConnection: %v\n", err)
 		}
 	}()
-	ctx, done := context.WithCancel(ctx)
-	defer done()
 
 	fileHander := NewFSServer(os.DirFS(config.LocalPath), 8)
-	initDataChannel := func(d *webrtc.DataChannel) {
-		log.Printf("init fileServer channel")
-		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+
+	dataChannels := []DataChannelHandler{&DataChannelCallback{
+		Name: "fileServer",
+		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
+			if !authorized {
+				// TODO: error response
+				return
+			}
 			fileHander.HandleMessage(ctx, msg.Data, msg.IsString, func(res *FileOperationResult) error {
 				if res.IsJSON() {
 					return d.SendText(string(res.ToBytes()))
@@ -80,29 +88,36 @@ func PublishFiles(ctx context.Context, config *Config) error {
 					return d.Send(res.ToBytes())
 				}
 			})
-		})
-	}
+		},
+	}, &DataChannelCallback{
+		Name: "controlEvent",
+		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
+			var auth struct {
+				Type  string `json:"type"`
+				Token string `json:"token"`
+			}
+			_ = json.Unmarshal(msg.Data, &auth)
+			if auth.Type == "auth" {
+				authorized = auth.Token == config.AuthToken
+				j, _ := json.Marshal(map[string]interface{}{
+					"type":   "authResult",
+					"result": authorized,
+				})
+				d.SendText(string(j))
+			}
+		},
+	}}
 
-	rtcConn.PC.OnDataChannel(func(d *webrtc.DataChannel) {
-		log.Printf("New DataChannel %s %d\n", d.Label(), d.ID())
-		if d.Label() == "fileServer" {
-			initDataChannel(d)
-		}
-	})
-
-	// TODO
-	if rtcConn.ayameConn.AuthResult.IsExistClient {
-		d, _ := rtcConn.PC.CreateDataChannel("fileServer", nil)
-		initDataChannel(d)
-	}
-
-	rtcConn.Start()
+	rtcConn.Start(dataChannels)
 	return rtcConn.Wait(ctx)
 }
 
 func TraverseForTest(ctx context.Context, config *Config) error {
 	roomID := config.RoomIdPrefix + config.RoomName + ".1"
 	log.Println("waiting for connect: ", roomID)
+	var client *FSClient
+	authorized := config.AuthToken == ""
+
 	rtcConn, err := NewRTCConn(config.SignalingUrl, roomID, config.SignalingKey)
 	if err != nil {
 		return err
@@ -112,41 +127,66 @@ func TraverseForTest(ctx context.Context, config *Config) error {
 			log.Printf("cannot close peerConnection: %v\n", err)
 		}
 	}()
-	ctx, done := context.WithCancel(ctx)
-	defer done()
 
-	initDataChannel := func(d *webrtc.DataChannel) {
-		client := NewFSClient(func(req *FileOperationRequest) error {
-			return d.SendText(string(req.ToBytes()))
-		})
-		d.OnOpen(func() {
-			log.Printf("init fileServer channel(client)")
-			go func() {
-				fs.WalkDir(client, "/", func(path string, d fs.DirEntry, err error) error {
-					log.Println(path)
-					return nil
+	var wg sync.WaitGroup
+	wg.Add(1)
+	if config.AuthToken != "" {
+		wg.Add(1)
+	}
+
+	dataChannels := []DataChannelHandler{&DataChannelCallback{
+		Name: "fileServer",
+		OnOpenFunc: func(dc *webrtc.DataChannel) {
+			client = NewFSClient(func(req *FileOperationRequest) error {
+				return dc.SendText(string(req.ToBytes()))
+			})
+			wg.Done()
+		},
+		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
+			if client != nil {
+				client.HandleMessage(msg.Data, msg.IsString)
+			}
+		},
+	}, &DataChannelCallback{
+		Name: "controlEvent",
+		OnOpenFunc: func(d *webrtc.DataChannel) {
+			if config.AuthToken != "" {
+				j, _ := json.Marshal(map[string]interface{}{
+					"type":  "auth",
+					"token": config.AuthToken,
 				})
-				rtcConn.Close()
-			}()
-		})
-		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-			client.HandleMessage(msg.Data, msg.IsString)
-		})
-	}
+				d.SendText(string(j))
+			}
+		},
+		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
+			var auth struct {
+				Type   string `json:"type"`
+				Result bool   `json:"result"`
+			}
+			_ = json.Unmarshal(msg.Data, &auth)
+			if auth.Type == "authResult" {
+				authorized = auth.Result
+				wg.Done()
+			}
+		},
+	}}
 
-	rtcConn.PC.OnDataChannel(func(d *webrtc.DataChannel) {
-		log.Printf("New DataChannel %s %d\n", d.Label(), d.ID())
-		if d.Label() == "fileServer" {
-			initDataChannel(d)
-		}
-	})
-	// TODO
-	if rtcConn.ayameConn.AuthResult.IsExistClient {
-		d, _ := rtcConn.PC.CreateDataChannel("fileServer", nil)
-		initDataChannel(d)
-	}
+	rtcConn.Start(dataChannels)
 
-	rtcConn.Start()
+	log.Println("connectiong...")
+	wg.Wait()
+	log.Println("connected!", authorized)
+	if authorized {
+		go func() {
+			fs.WalkDir(client, "/", func(path string, d fs.DirEntry, err error) error {
+				log.Println(path)
+				return nil
+			})
+			rtcConn.Close()
+		}()
+	} else {
+		rtcConn.Close()
+	}
 	return rtcConn.Wait(ctx)
 }
 
@@ -155,50 +195,51 @@ func Pairing(ctx context.Context, config *Config) error {
 	if err != nil {
 		return err
 	}
-	pinstr := fmt.Sprintf("%06d", pin)
-	log.Println("PIN: ", pinstr)
-
 	ctx, done := context.WithTimeout(ctx, time.Duration(config.PairingTimeoutSec)*time.Second)
 	defer done()
+
+	pinstr := fmt.Sprintf("%06d", pin)
+	log.Println("PIN: ", pinstr)
 
 	rtcConn, err := NewRTCConn(config.SignalingUrl, config.PairingRoomIdPrefix+pinstr, config.SignalingKey)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := rtcConn.Close(); err != nil {
-			log.Printf("cannot close peerConnection: %v\n", err)
-		}
-	}()
+	defer rtcConn.Close()
+	if rtcConn.ayameConn.AuthResult.IsExistClient {
+		return errors.New("room already used")
+	}
 
-	rtcConn.PC.OnDataChannel(func(d *webrtc.DataChannel) {
-		log.Printf("New DataChannel %s %d\n", d.Label(), d.ID())
-		if d.Label() == "secretExchange" {
-			d.OnOpen(func() {
-				j, _ := json.Marshal(map[string]interface{}{
-					"type":         "hello",
-					"roomId":       config.RoomIdPrefix + config.RoomName,
-					"signalingKey": config.SignalingKey,
-					"userAgent":    "rtcfs",
-					"version":      1,
-				})
-				d.SendText(string(j))
+	dataChannels := []DataChannelHandler{&DataChannelCallback{
+		Name: "secretExchange",
+		OnOpenFunc: func(dc *webrtc.DataChannel) {
+			j, _ := json.Marshal(map[string]interface{}{
+				"type":         "hello",
+				"roomId":       config.RoomIdPrefix + config.RoomName,
+				"signalingKey": config.SignalingKey,
+				"token":        config.AuthToken,
+				"userAgent":    "rtcfs",
+				"version":      1,
 			})
+			dc.SendText(string(j))
+		},
+		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
 			d.OnMessage(func(msg webrtc.DataChannelMessage) {
 				// TODO: Save credentials
 				log.Println(string(msg.Data))
 				rtcConn.Close()
 			})
-		}
-	})
+		},
+	}}
 
-	rtcConn.Start()
+	rtcConn.Start(dataChannels)
 	return rtcConn.Wait(ctx)
 }
 
 func main() {
 	confPath := flag.String("conf", "config.toml", "conf path")
 	roomName := flag.String("room", "", "Ayame room name")
+	authToken := flag.String("token", "", "auth token")
 	localPath := flag.String("path", ".", "local path to share")
 	flag.Parse()
 
@@ -208,6 +249,9 @@ func main() {
 	}
 	if *roomName != "" {
 		config.RoomName = *roomName
+	}
+	if *authToken != "" {
+		config.AuthToken = *authToken
 	}
 
 	if config.ThumbnailCacheDir != "" {

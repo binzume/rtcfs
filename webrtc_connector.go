@@ -12,6 +12,44 @@ type RTCConn struct {
 	PC        *webrtc.PeerConnection
 }
 
+type DataChannelHandler interface {
+	Label() string
+	OnOpen(*webrtc.DataChannel)
+	OnClose(*webrtc.DataChannel)
+	OnMessage(*webrtc.DataChannel, webrtc.DataChannelMessage)
+}
+
+type DataChannelCallback struct {
+	Name          string
+	OnOpenFunc    func(*webrtc.DataChannel)
+	OnMessageFunc func(*webrtc.DataChannel, webrtc.DataChannelMessage)
+}
+
+func (d *DataChannelCallback) Label() string {
+	return d.Name
+}
+
+func (d *DataChannelCallback) OnOpen(ch *webrtc.DataChannel) {
+	if d.OnOpenFunc != nil {
+		d.OnOpenFunc(ch)
+	}
+}
+
+func (d *DataChannelCallback) OnClose(*webrtc.DataChannel) {
+}
+
+func (d *DataChannelCallback) OnMessage(ch *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
+	if d.OnMessageFunc != nil {
+		d.OnMessageFunc(ch, msg)
+	}
+}
+
+func initDataChannelHandler(d *webrtc.DataChannel, handler DataChannelHandler) {
+	d.OnOpen(func() { handler.OnOpen(d) })
+	d.OnMessage(func(msg webrtc.DataChannelMessage) { handler.OnMessage(d, msg) })
+	d.OnClose(func() { handler.OnClose(d) })
+}
+
 func NewRTCConn(signalingUrl, roomID, signalingKey string) (*RTCConn, error) {
 	conn, err := Dial(signalingUrl, roomID, signalingKey)
 	if err != nil {
@@ -35,7 +73,8 @@ func NewRTCConn(signalingUrl, roomID, signalingKey string) (*RTCConn, error) {
 	return &RTCConn{ayameConn: conn, PC: peerConnection}, nil
 }
 
-func (c *RTCConn) Start() {
+// AddTrack/CreateDataChannel shoudl be done before Start()
+func (c *RTCConn) Start(dataChannles []DataChannelHandler) {
 	c.PC.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		log.Printf("Peer Connection State has changed: %s\n", s.String())
 		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateDisconnected || s == webrtc.PeerConnectionStateClosed {
@@ -51,6 +90,23 @@ func (c *RTCConn) Start() {
 		cand := ic.ToJSON()
 		c.ayameConn.Candidate(cand.Candidate, cand.SDPMid, cand.SDPMLineIndex)
 	})
+
+	// Data channels
+	if len(dataChannles) > 0 {
+		c.PC.OnDataChannel(func(d *webrtc.DataChannel) {
+			for _, c := range dataChannles {
+				if c.Label() == d.Label() {
+					initDataChannelHandler(d, c)
+				}
+			}
+		})
+		if c.ayameConn.AuthResult.IsExistClient {
+			for _, d := range dataChannles {
+				dc, _ := c.PC.CreateDataChannel(d.Label(), nil)
+				initDataChannelHandler(dc, d)
+			}
+		}
+	}
 
 	if c.ayameConn.AuthResult.IsExistClient {
 		offer, _ := c.PC.CreateOffer(nil)
