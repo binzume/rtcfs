@@ -121,6 +121,38 @@ func NewFSServer(fsys fs.FS, parallels int) *FSServer {
 	return &FSServer{fsys: WrapFS(fsys), sem: semaphore.NewWeighted(int64(parallels))}
 }
 
+// well known types
+var contentTypes = map[string]string{
+	// video
+	".mp4":  "video/mp4",
+	".m4v":  "video/mp4",
+	".f4v":  "video/mp4",
+	".webm": "video/webm",
+	".ogv":  "video/ogv",
+
+	// image
+	".jpeg": "image/jpeg",
+	".jpg":  "image/jpeg",
+	".gif":  "image/gif",
+	".png":  "image/png",
+	".bmp":  "image/bmp",
+	".webp": "image/webp",
+
+	// audio
+	".aac": "audio/aac",
+	".mp3": "audio/mp3",
+	".ogg": "audio/ogg",
+	".mid": "audio/midi",
+}
+
+func ContentTypeByPath(s string) string {
+	ext := strings.ToLower(path.Ext(s))
+	if typ, ok := contentTypes[ext]; ok {
+		return typ
+	}
+	return mime.TypeByExtension(ext)
+}
+
 func NewFileEntry(info os.FileInfo, fswritable bool) *FileEntry {
 	if ent, ok := info.(*FileEntry); ok {
 		return ent
@@ -134,7 +166,7 @@ func NewFileEntry(info os.FileInfo, fswritable bool) *FileEntry {
 	if info.IsDir() {
 		f.Type = "directory"
 	} else {
-		f.Type = mime.TypeByExtension(path.Ext(f.FileName))
+		f.Type = ContentTypeByPath(f.FileName)
 	}
 	if DefaultThumbnailer.Supported(f.Type) {
 		f.SetMetaData("thumbnail", ThumbnailSuffix)
