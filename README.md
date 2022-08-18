@@ -31,7 +31,7 @@ rtcfs -room RoomName -path /dir/to/share
 ### ファイルリストを表示(デバッグ用)
 
 ```bash
-rtcfs -room RoomName traverse-test
+rtcfs -room RoomName ls
 ```
 
 # License

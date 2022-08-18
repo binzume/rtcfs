@@ -112,7 +112,7 @@ func PublishFiles(ctx context.Context, config *Config) error {
 	return rtcConn.Wait(ctx)
 }
 
-func TraverseForTest(ctx context.Context, config *Config) error {
+func ListFiles(ctx context.Context, config *Config, path string) error {
 	roomID := config.RoomIdPrefix + config.RoomName + ".1"
 	log.Println("waiting for connect: ", roomID)
 	var client *FSClient
@@ -122,11 +122,7 @@ func TraverseForTest(ctx context.Context, config *Config) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := rtcConn.Close(); err != nil {
-			log.Printf("cannot close peerConnection: %v\n", err)
-		}
-	}()
+	defer rtcConn.Close()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -175,19 +171,22 @@ func TraverseForTest(ctx context.Context, config *Config) error {
 
 	log.Println("connectiong...")
 	wg.Wait()
-	log.Println("connected!", authorized)
-	if authorized {
-		go func() {
-			fs.WalkDir(client, "/", func(path string, d fs.DirEntry, err error) error {
-				log.Println(path)
-				return nil
-			})
-			rtcConn.Close()
-		}()
-	} else {
-		rtcConn.Close()
+	log.Println("connected! ", authorized)
+	if !authorized {
+		return errors.New("auth error")
 	}
-	return rtcConn.Wait(ctx)
+	if path == "" {
+		return fs.WalkDir(client, "/", func(path string, d fs.DirEntry, err error) error {
+			log.Println(path)
+			return nil
+		})
+	}
+	files, err := client.ReadDir(path)
+	for _, file := range files {
+		finfo, _ := file.Info()
+		fmt.Println(file.Type(), "\t", finfo.Size(), "\t", file.Name())
+	}
+	return err
 }
 
 func Pairing(ctx context.Context, config *Config) error {
@@ -267,8 +266,8 @@ func main() {
 		if err != nil {
 			log.Println(err)
 		}
-	case "traverse-test":
-		err := TraverseForTest(context.Background(), config)
+	case "ls":
+		err := ListFiles(context.Background(), config, flag.Arg(1))
 		if err != nil {
 			log.Println(err)
 		}
