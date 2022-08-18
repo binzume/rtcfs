@@ -20,7 +20,7 @@ type FSClient struct {
 }
 
 func NewFSClient(sendFunc func(req *FileOperationRequest) error) *FSClient {
-	return &FSClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}, MaxReadSize: 48000}
+	return &FSClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}, MaxReadSize: 65000}
 }
 
 func (c *FSClient) request(req *FileOperationRequest) (*FileOperationResult, error) {
@@ -100,17 +100,42 @@ func (c *FSClient) ReadDir(name string) ([]fs.DirEntry, error) {
 	return c.ReadDirRange(name, 0, -1)
 }
 
+type OpenDirFS interface {
+	OpenDir(name string) (fs.ReadDirFile, error)
+}
+
+func (c *FSClient) OpenDir(name string) (fs.ReadDirFile, error) {
+	return &clientFile{c: c, name: name}, nil
+}
+
 func (c *FSClient) ReadDirRange(name string, pos, limit int) ([]fs.DirEntry, error) {
-	res, err := c.request(&FileOperationRequest{Op: "files", Path: name, Pos: int64(pos), Len: limit})
-	if err != nil {
-		return nil, err
-	}
-	var result []*FileEntry
-	json.Unmarshal(res.Data, &result)
 	var entries []fs.DirEntry
-	for _, f := range result {
-		entries = append(entries, &clientDirEnt{FileEntry: f})
+	if limit < 0 {
+		limit = 65536
 	}
+
+	for {
+		n := limit - len(entries)
+		if n <= 0 {
+			return entries, nil
+		}
+		if n > 200 {
+			n = 200
+		}
+		res, err := c.request(&FileOperationRequest{Op: "files", Path: name, Pos: int64(pos), Len: n})
+		if err != nil {
+			return entries, err
+		}
+		var result []*FileEntry
+		json.Unmarshal(res.Data, &result)
+		for _, f := range result {
+			entries = append(entries, &clientDirEnt{FileEntry: f})
+		}
+		if len(result) != n {
+			break // io.EOF
+		}
+	}
+
 	return entries, nil
 }
 
@@ -123,7 +148,7 @@ func (f *clientDirEnt) Type() fs.FileMode {
 }
 
 func (f *clientDirEnt) Info() (fs.FileInfo, error) {
-	return f, nil
+	return f.FileEntry, nil
 }
 
 type clientFile struct {
@@ -158,6 +183,9 @@ func (f *clientFile) Close() error {
 func (f *clientFile) ReadDir(n int) ([]fs.DirEntry, error) {
 	entries, err := f.c.ReadDirRange(f.name, int(f.pos), n)
 	f.pos += int64(len(entries))
+	if err == nil && len(entries) < n {
+		err = io.EOF
+	}
 	return entries, err
 }
 

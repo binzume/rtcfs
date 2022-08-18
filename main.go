@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -98,7 +99,7 @@ func PublishFiles(ctx context.Context, config *Config) error {
 			}
 			_ = json.Unmarshal(msg.Data, &auth)
 			if auth.Type == "auth" {
-				authorized = auth.Token == config.AuthToken
+				authorized = authorized || auth.Token == config.AuthToken
 				j, _ := json.Marshal(map[string]interface{}{
 					"type":   "authResult",
 					"result": authorized,
@@ -155,14 +156,19 @@ func ListFiles(ctx context.Context, config *Config, path string) error {
 			}
 		},
 		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
-			var auth struct {
+			var event struct {
 				Type   string `json:"type"`
 				Result bool   `json:"result"`
+				RoomID bool   `json:"roomId"`
 			}
-			_ = json.Unmarshal(msg.Data, &auth)
-			if auth.Type == "authResult" {
-				authorized = auth.Result
+			_ = json.Unmarshal(msg.Data, &event)
+			if event.Type == "authResult" {
+				authorized = event.Result
 				wg.Done()
+			} else if event.Type == "redirect" {
+				log.Println("TODO: Support redirect event. (roomId:", event.RoomID)
+				wg.Done()
+				rtcConn.Close()
 			}
 		},
 	}}
@@ -175,17 +181,31 @@ func ListFiles(ctx context.Context, config *Config, path string) error {
 	if !authorized {
 		return errors.New("auth error")
 	}
-	if path == "" {
-		return fs.WalkDir(client, "/", func(path string, d fs.DirEntry, err error) error {
-			log.Println(path)
-			return nil
+	if strings.HasSuffix(path, "/**") {
+		return fs.WalkDir(client, strings.TrimSuffix(path, "/**"), func(path string, d fs.DirEntry, err error) error {
+			finfo, _ := d.Info()
+			ent := NewFileEntry(finfo, true)
+			fmt.Println(ent.Mode(), "\t", ent.Size(), "\t", ent.Type, "\t", path)
+			return err
 		})
+	} else {
+		dir, err := client.OpenDir(path)
+		if err != nil {
+			return err
+		}
+		for {
+			files, err := dir.ReadDir(200)
+			for _, file := range files {
+				finfo, _ := file.Info()
+				ent := NewFileEntry(finfo, true)
+				fmt.Println(ent.Mode(), "\t", ent.Size(), "\t", ent.Type, "\t", ent.Name())
+			}
+			if err != nil {
+				break
+			}
+		}
 	}
-	files, err := client.ReadDir(path)
-	for _, file := range files {
-		finfo, _ := file.Info()
-		fmt.Println(file.Type(), "\t", finfo.Size(), "\t", file.Name())
-	}
+
 	return err
 }
 
