@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"sync"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
@@ -18,6 +19,8 @@ type AyameConn struct {
 	ready      atomic.Bool
 	done       chan struct{}
 	candidates []*ICECandidate
+
+	sendLock sync.Mutex
 }
 
 type JsonSocket interface {
@@ -104,18 +107,24 @@ func (c *AyameConn) recvLoop(msgCh chan<- *SignalingMessage) {
 		if msg.Type == "answer" || msg.Type == "offer" {
 			c.ready.Store(true)
 			for _, cand := range c.candidates {
-				c.soc.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
+				c.send(&SignalingMessage{Type: "candidate", ICE: cand})
 			}
 		}
 	}
 }
 
+func (c *AyameConn) send(msg *SignalingMessage) error {
+	c.sendLock.Lock()
+	defer c.sendLock.Unlock()
+	return c.soc.WriteJSON(msg)
+}
+
 func (c *AyameConn) Answer(sdp string) error {
-	return c.soc.WriteJSON(&SignalingMessage{Type: "answer", SDP: sdp})
+	return c.send(&SignalingMessage{Type: "answer", SDP: sdp})
 }
 
 func (c *AyameConn) Offer(sdp string) error {
-	return c.soc.WriteJSON(&SignalingMessage{Type: "offer", SDP: sdp})
+	return c.send(&SignalingMessage{Type: "offer", SDP: sdp})
 }
 
 func (c *AyameConn) Candidate(candidate string, id *string, index *uint16) error {
@@ -124,7 +133,7 @@ func (c *AyameConn) Candidate(candidate string, id *string, index *uint16) error
 		c.candidates = append(c.candidates, cand)
 		return nil
 	}
-	return c.soc.WriteJSON(&SignalingMessage{Type: "candidate", ICE: cand})
+	return c.send(&SignalingMessage{Type: "candidate", ICE: cand})
 }
 
 func (c *AyameConn) Close() {
