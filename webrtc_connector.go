@@ -22,6 +22,7 @@ type DataChannelHandler interface {
 type DataChannelCallback struct {
 	Name          string
 	OnOpenFunc    func(*webrtc.DataChannel)
+	OnCloseFunc   func(*webrtc.DataChannel)
 	OnMessageFunc func(*webrtc.DataChannel, webrtc.DataChannelMessage)
 }
 
@@ -35,7 +36,10 @@ func (d *DataChannelCallback) OnOpen(ch *webrtc.DataChannel) {
 	}
 }
 
-func (d *DataChannelCallback) OnClose(*webrtc.DataChannel) {
+func (d *DataChannelCallback) OnClose(ch *webrtc.DataChannel) {
+	if d.OnCloseFunc != nil {
+		d.OnCloseFunc(ch)
+	}
 }
 
 func (d *DataChannelCallback) OnMessage(ch *webrtc.DataChannel, msg webrtc.DataChannelMessage) {

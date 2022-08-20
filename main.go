@@ -7,10 +7,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -113,7 +115,7 @@ func PublishFiles(ctx context.Context, config *Config) error {
 	return rtcConn.Wait(ctx)
 }
 
-func ListFiles(ctx context.Context, config *Config, path string) error {
+func getClinet(ctx context.Context, config *Config) (*RTCConn, *FSClient, error) {
 	roomID := config.RoomIdPrefix + config.RoomName + ".1"
 	log.Println("waiting for connect: ", roomID)
 	var client *FSClient
@@ -121,9 +123,8 @@ func ListFiles(ctx context.Context, config *Config, path string) error {
 
 	rtcConn, err := NewRTCConn(config.SignalingUrl, roomID, config.SignalingKey)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer rtcConn.Close()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -143,6 +144,9 @@ func ListFiles(ctx context.Context, config *Config, path string) error {
 			if client != nil {
 				client.HandleMessage(msg.Data, msg.IsString)
 			}
+		},
+		OnCloseFunc: func(d *webrtc.DataChannel) {
+			client.Abort()
 		},
 	}, &DataChannelCallback{
 		Name: "controlEvent",
@@ -179,8 +183,15 @@ func ListFiles(ctx context.Context, config *Config, path string) error {
 	wg.Wait()
 	log.Println("connected! ", authorized)
 	if !authorized {
-		return errors.New("auth error")
+		rtcConn.Close()
+		return nil, nil, errors.New("auth error")
 	}
+	return rtcConn, client, nil
+}
+
+func ListFiles(ctx context.Context, config *Config, path string) error {
+	rtcConn, client, err := getClinet(ctx, config)
+	defer rtcConn.Close()
 	if strings.HasSuffix(path, "/**") {
 		return fs.WalkDir(client, strings.TrimSuffix(path, "/**"), func(path string, d fs.DirEntry, err error) error {
 			finfo, _ := d.Info()
@@ -206,6 +217,28 @@ func ListFiles(ctx context.Context, config *Config, path string) error {
 		}
 	}
 
+	return err
+}
+
+func pullFile(ctx context.Context, config *Config, path string) error {
+	rtcConn, client, err := getClinet(ctx, config)
+	defer rtcConn.Close()
+	stat, err := client.Stat(path)
+	if err != nil {
+		return err
+	}
+	log.Println("Size: ", stat.Size())
+	r, err := client.Open(path)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	w, err := os.Create(filepath.Base(path))
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	_, err = io.Copy(w, r)
 	return err
 }
 
@@ -288,6 +321,11 @@ func main() {
 		}
 	case "ls":
 		err := ListFiles(context.Background(), config, flag.Arg(1))
+		if err != nil {
+			log.Println(err)
+		}
+	case "pull":
+		err := pullFile(context.Background(), config, flag.Arg(1))
 		if err != nil {
 			log.Println(err)
 		}
