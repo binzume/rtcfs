@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"testing"
@@ -33,12 +34,22 @@ func TestFSClient_Dir(t *testing.T) {
 	if err != nil || f == nil {
 		t.Fatal("Open() dir error: ", err)
 	}
-	stat, err := f.Stat()
-	if err != nil || stat == nil {
-		t.Fatal("file Stat() error: ", err)
-	}
 	f.Close()
 
+}
+
+func TestFSClient_Stat(t *testing.T) {
+	client := newFakeClient()
+	defer client.Abort()
+
+	// Dir
+	stat, err := client.Stat("/")
+	if err != nil || stat == nil {
+		t.Fatal("Stat() file error: ", err)
+	}
+	if stat.IsDir() != true {
+		t.Fatal("IsDir() should be true ")
+	}
 	t.Log("Name(): ", stat.Name())
 	t.Log("Size(): ", stat.Size())
 	t.Log("IsDir(): ", stat.IsDir())
@@ -46,8 +57,28 @@ func TestFSClient_Dir(t *testing.T) {
 	t.Log("Mode(): ", stat.Mode())
 	t.Log("Sys(): ", stat.Sys())
 
-	if stat.IsDir() != true {
-		t.Fatal("IsDir() should be true ")
+	// Normal file
+	stat, err = client.Stat("/test.png")
+	if err != nil || stat == nil {
+		t.Fatal("Stat() file error: ", err)
+	}
+	if stat.IsDir() != false {
+		t.Fatal("IsDir() should be false ")
+	}
+	t.Log("Name(): ", stat.Name())
+	t.Log("Size(): ", stat.Size())
+	t.Log("IsDir(): ", stat.IsDir())
+	t.Log("ModTime(): ", stat.ModTime())
+	t.Log("Mode(): ", stat.Mode())
+	t.Log("Sys(): ", stat.Sys())
+
+	// Not found
+	stat, err = client.Stat("/not_exist_file")
+	if err == nil || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("Stat() should be ErrNotExist: ", err)
+	}
+	if stat != nil {
+		t.Fatal("stat shoudl be nil ", stat)
 	}
 }
 
@@ -57,23 +88,16 @@ func TestFSClient_File(t *testing.T) {
 
 	fname := "/test.png"
 
+	stat, err := client.Stat(fname)
+	if err != nil {
+		t.Fatal("Stat() file error: ", err)
+	}
+
 	f, err := client.Open(fname)
 	if err != nil || f == nil {
 		t.Fatal("Open() file error: ", err)
 	}
-	stat, err := f.Stat()
 	f.Close()
-
-	t.Log("Name(): ", stat.Name())
-	t.Log("Size(): ", stat.Size())
-	t.Log("IsDir(): ", stat.IsDir())
-	t.Log("ModTime(): ", stat.ModTime())
-	t.Log("Mode(): ", stat.Mode())
-	t.Log("Sys(): ", stat.Sys())
-
-	if stat.IsDir() != false {
-		t.Fatal("IsDir() should be false ")
-	}
 
 	data, err := fs.ReadFile(client, fname)
 	if err != nil {

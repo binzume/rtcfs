@@ -8,19 +8,21 @@ import (
 	"io/fs"
 	"os"
 	"sync"
+	"time"
 )
 
 // FSClient implements fs.FS
 type FSClient struct {
 	sendFunc    func(req *FileOperationRequest) error
 	reqCount    uint32
-	MaxReadSize int
 	wait        map[uint32]chan *FileOperationResult
 	locker      sync.Mutex
+	MaxReadSize int
+	Timeout     time.Duration
 }
 
 func NewFSClient(sendFunc func(req *FileOperationRequest) error) *FSClient {
-	return &FSClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}, MaxReadSize: 65000}
+	return &FSClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}, MaxReadSize: 65000, Timeout: 30 * time.Second}
 }
 
 func (c *FSClient) request(req *FileOperationRequest) (*FileOperationResult, error) {
@@ -36,21 +38,26 @@ func (c *FSClient) request(req *FileOperationRequest) (*FileOperationResult, err
 	if err != nil {
 		return nil, err
 	}
-	res := <-resCh
-	if res == nil {
-		return nil, os.ErrClosed
+	var res *FileOperationResult
+	select {
+	case <-time.After(c.Timeout):
+		return nil, errors.New("timeout")
+	case res = <-resCh:
+		if res == nil {
+			return nil, os.ErrClosed
+		}
 	}
 	if res.Error != "" {
 		// TODO: more errors
 		switch res.Error {
 		case "unexpected EOF":
-			return nil, io.ErrUnexpectedEOF
+			return res, io.ErrUnexpectedEOF
 		case "EOF":
-			return nil, io.EOF
-		case "file does not exist":
-			return nil, fs.ErrNotExist
+			return res, io.EOF
+		case "noent":
+			return res, fs.ErrNotExist
 		default:
-			return nil, errors.New(res.Error)
+			return res, errors.New(res.Error)
 		}
 	}
 	return res, nil

@@ -182,6 +182,17 @@ func fixPath(path string) string {
 	return path
 }
 
+func errorToStr(err error) string {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return "unexpected EOF"
+	} else if errors.Is(err, io.EOF) {
+		return "EOF"
+	} else if errors.Is(err, fs.ErrNotExist) {
+		return "noent"
+	}
+	return fmt.Sprint(err)
+}
+
 func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, writer func(*FileOperationResult) error) error {
 	if !isjson {
 		rid := binary.LittleEndian.Uint32(data[4:8])
@@ -200,7 +211,7 @@ func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, 
 
 		ret, err := h.HanldeFileOp(&op)
 		if err != nil {
-			writer(&FileOperationResult{RID: op.RID, Error: fmt.Sprint(err)})
+			writer(&FileOperationResult{RID: op.RID, Error: errorToStr(err)})
 		} else {
 			if bindata, ok := ret.([]byte); ok {
 				err = writer(&FileOperationResult{RID: op.RID, binData: bindata})
@@ -209,7 +220,7 @@ func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, 
 				err = writer(&FileOperationResult{RID: op.RID, Data: jsonData})
 			}
 			if err != nil {
-				_ = writer(&FileOperationResult{RID: op.RID, Error: fmt.Sprint(err)})
+				_ = writer(&FileOperationResult{RID: op.RID, Error: errorToStr(err)})
 			}
 		}
 	}()
@@ -277,39 +288,29 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 			return nil, err
 		}
 		defer f.Close()
-		if op.Pos > 0 {
-			_, err = f.(io.Seeker).Seek(op.Pos, 0) // TODO
-			if err != nil {
+		buf := make([]byte, op.Len)
+		if f, ok := f.(io.ReaderAt); ok {
+			n, err := f.ReadAt(buf, op.Pos)
+			if err != nil && (n == 0 || err != io.ErrUnexpectedEOF && err != io.EOF) {
 				return nil, err
 			}
+			return buf[:n], nil
 		}
-
-		buf := make([]byte, op.Len)
-		n, err := io.ReadFull(f, buf)
-		if err != nil && (n == 0 || err != io.ErrUnexpectedEOF) {
-			return nil, err
-		}
-		return buf[:n], nil
 	case "write":
 		f, err := h.fsys.OpenWriter(fixPath(op.Path))
 		if err != nil {
 			return nil, err
 		}
 		defer f.Close()
-		if op.Pos > 0 {
-			_, err = f.(io.Seeker).Seek(op.Pos, 0) // TODO
+		if f, ok := f.(io.WriterAt); ok {
+			_, err := f.WriteAt(op.Buf, op.Pos)
 			if err != nil {
 				return nil, err
 			}
+			return true, nil
 		}
-		buf := make([]byte, op.Len)
-		_, err = f.Write(buf)
-		if err != nil {
-			return nil, err
-		}
-		return buf, nil
 	case "remove":
 		return h.fsys.Remove(fixPath(op.Path)) == nil, nil
 	}
-	return nil, nil
+	return nil, errors.New("unsupported operation")
 }
