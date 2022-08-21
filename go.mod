@@ -1,4 +1,4 @@
-module github.com/binzume/rtcfs
+module github.com/binzume/webrtcfs
 
 go 1.19
 

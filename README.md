@@ -10,7 +10,7 @@ Go 1.18以降が必要です．
 ### インストール
 
 ```bash
-go install github.com/binzume/rtcfs@latest
+go install github.com/binzume/webrtcfs@latest
 ```
 
 ### ペアリング
@@ -19,7 +19,7 @@ PINが表示されるのでクライアント側に入力してください．
 仮実装です．RoomNameは秘密にする必要があるので適当なランダムっぽい名前にしてください．
 
 ```bash
-rtcfs -room RoomName pairing
+webrtcfs -room RoomName pairing
 ```
 
 RoomNameはWebRTCのシグナリングサーバを経由してしまうので，気休めとして `-token` オプションで追加のパスワードを設定できます．
@@ -27,7 +27,7 @@ RoomNameはWebRTCのシグナリングサーバを経由してしまうので，
 ### ファイルを共有
 
 ```bash
-rtcfs -room RoomName -path /dir/to/share
+webrtcfs -room RoomName -path /dir/to/share
 ```
 
 ### クライアント
@@ -39,17 +39,17 @@ TODO: FUSE support.
 
 ```bash
 # start shell
-rtcfs -room RoomName shell
+webrtcfs -room RoomName shell
 
 # file list
-rtcfs -room RoomName ls /
+webrtcfs -room RoomName ls /
 # traverse directories
-rtcfs -room RoomName ls /**
+webrtcfs -room RoomName ls /**
 
 # copy remote to local
-rtcfs -room RoomName pull remotefile.txt
+webrtcfs -room RoomName pull remotefile.txt
 # copy local to remote
-rtcfs -room RoomName push localfile.txt
+webrtcfs -room RoomName push localfile.txt
 ```
 
 # License
