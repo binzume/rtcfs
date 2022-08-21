@@ -22,16 +22,34 @@ PINが表示されるのでクライアント側に入力してください．
 rtcfs -room RoomName pairing
 ```
 
+RoomNameはWebRTCのシグナリングサーバを経由してしまうので，気休めとして `-token` オプションで追加のパスワードを設定できます．
+
 ### ファイルを共有
 
 ```bash
 rtcfs -room RoomName -path /dir/to/share
 ```
 
-### ファイルリストを表示(デバッグ用)
+### クライアント
+
+とりあえずデバッグ用に作った簡易的なシェルが付いています．
+
+TODO: FUSE support.
+
 
 ```bash
-rtcfs -room RoomName ls
+# start shell
+rtcfs -room RoomName shell
+
+# file list
+rtcfs -room RoomName ls /
+# traverse directories
+rtcfs -room RoomName ls /**
+
+# copy remote to local
+rtcfs -room RoomName pull remotefile.txt
+# copy local to remote
+rtcfs -room RoomName push localfile.txt
 ```
 
 # License
