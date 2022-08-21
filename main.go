@@ -203,7 +203,7 @@ func main() {
 		if err != nil {
 			log.Println(err)
 		}
-	case "pull", "ls":
+	case "pull", "push", "ls", "cat", "rm":
 		err := ShellExec(context.Background(), config, flag.Arg(0), flag.Arg(1))
 		if err != nil {
 			log.Println(err)

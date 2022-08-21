@@ -221,6 +221,11 @@ func shellExecCmd(ctx context.Context, client *FSClient, cwd, cmd, arg string) e
 		return shellCat(ctx, client, cwd, arg)
 	case "push":
 		return shellPushFile(ctx, client, cwd, arg)
+	case "rm":
+		return client.Remove(path.Join(cwd, arg))
+	case "?", "help":
+		fmt.Println("Commands: exit, pwd, cd PATH, ls PATH, pull FILE, push FILE, cat FILE, rm FILE")
+		return nil
 	default:
 		return errors.New("No such command: " + cmd)
 	}
@@ -242,8 +247,8 @@ func StartShell(ctx context.Context, config *Config) error {
 	}
 	defer rtcConn.Close()
 
-	fmt.Println("Commands: exit, pwd, cd PATH, ls PATH, pull FILE, push FILE, cat FILE")
 	cwd := "/"
+	shellExecCmd(ctx, client, cwd, "help", "")
 	s := bufio.NewScanner(os.Stdin)
 	for s.Scan() {
 		cmd := strings.SplitN(s.Text(), " ", 2)
