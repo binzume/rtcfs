@@ -2,20 +2,16 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
-	"math/big"
 	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/binzume/webrtcfs/rtcfs"
 	"github.com/binzume/webrtcfs/socfs"
-	"github.com/pion/webrtc/v3"
 )
 
 type Config struct {
@@ -76,52 +72,6 @@ func publishFiles(ctx context.Context, config *Config, options *rtcfs.ConnectOpt
 	return rtcfs.Publish(ctx, options, fsys)
 }
 
-func Pairing(ctx context.Context, config *Config) error {
-	pin, err := rand.Int(rand.Reader, big.NewInt(1000000))
-	if err != nil {
-		return err
-	}
-	ctx, done := context.WithTimeout(ctx, time.Duration(config.PairingTimeoutSec)*time.Second)
-	defer done()
-
-	pinstr := fmt.Sprintf("%06d", pin)
-	log.Println("PIN: ", pinstr)
-
-	rtcConn, err := rtcfs.NewRTCConn(config.SignalingUrl, config.PairingRoomIdPrefix+pinstr, config.SignalingKey)
-	if err != nil {
-		return err
-	}
-	defer rtcConn.Close()
-	if rtcConn.IsExistRoom() {
-		return errors.New("room already used")
-	}
-
-	dataChannels := []rtcfs.DataChannelHandler{&rtcfs.DataChannelCallback{
-		Name: "secretExchange",
-		OnOpenFunc: func(dc *webrtc.DataChannel) {
-			j, _ := json.Marshal(map[string]interface{}{
-				"type":         "hello",
-				"roomId":       config.RoomIdPrefix + config.RoomName,
-				"signalingKey": config.SignalingKey,
-				"token":        config.AuthToken,
-				"userAgent":    "rtcfs",
-				"version":      1,
-			})
-			dc.SendText(string(j))
-		},
-		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
-			d.OnMessage(func(msg webrtc.DataChannelMessage) {
-				// TODO: Save credentials
-				log.Println(string(msg.Data))
-				rtcConn.Close()
-			})
-		},
-	}}
-
-	rtcConn.Start(dataChannels)
-	return rtcConn.Wait(ctx)
-}
-
 func main() {
 	confPath := flag.String("conf", "config.toml", "conf path")
 	roomName := flag.String("room", "", "Ayame room name")
@@ -153,7 +103,11 @@ func main() {
 
 	switch flag.Arg(0) {
 	case "pairing":
-		err := Pairing(context.Background(), config)
+		err := rtcfs.Pairing(context.Background(), &rtcfs.PairingOptions{
+			ConnectOptions:      *options,
+			PairingRoomIDPrefix: config.PairingRoomIdPrefix,
+			Timeout:             time.Duration(config.PairingTimeoutSec) * time.Second,
+		})
 		if err != nil {
 			log.Println(err)
 		}
