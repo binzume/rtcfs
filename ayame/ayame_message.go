@@ -1,4 +1,4 @@
-package main
+package ayame
 
 type EmptyMessage struct {
 	Type string `json:"type"`

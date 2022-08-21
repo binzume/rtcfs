@@ -1,4 +1,4 @@
-package main
+package socfs
 
 import (
 	"context"
@@ -22,7 +22,7 @@ func newFakeClient(fsys fs.FS) *FSClient {
 }
 
 func TestFSClient_Dir(t *testing.T) {
-	client := newFakeClient(os.DirFS("testdata"))
+	client := newFakeClient(os.DirFS(dir))
 	defer client.Abort()
 
 	files, err := client.ReadDir("/")
@@ -38,7 +38,7 @@ func TestFSClient_Dir(t *testing.T) {
 }
 
 func TestFSClient_Stat(t *testing.T) {
-	client := newFakeClient(os.DirFS("testdata"))
+	client := newFakeClient(os.DirFS(dir))
 	defer client.Abort()
 
 	// Dir
@@ -82,7 +82,7 @@ func TestFSClient_Stat(t *testing.T) {
 }
 
 func TestFSClient_File(t *testing.T) {
-	client := newFakeClient(os.DirFS("testdata"))
+	client := newFakeClient(os.DirFS(dir))
 	defer client.Abort()
 
 	fname := "/test.png"
@@ -108,7 +108,7 @@ func TestFSClient_File(t *testing.T) {
 }
 
 func TestFSClient_Write(t *testing.T) {
-	fsys := NewWritableDirFS("testdata")
+	fsys := NewWritableDirFS(dir)
 	client := newFakeClient(fsys)
 	defer client.Abort()
 

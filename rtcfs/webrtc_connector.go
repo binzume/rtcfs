@@ -1,14 +1,15 @@
-package main
+package rtcfs
 
 import (
 	"context"
 	"log"
 
+	"github.com/binzume/webrtcfs/ayame"
 	"github.com/pion/webrtc/v3"
 )
 
 type RTCConn struct {
-	ayameConn *AyameConn
+	ayameConn *ayame.AyameConn
 	PC        *webrtc.PeerConnection
 }
 
@@ -55,7 +56,7 @@ func initDataChannelHandler(d *webrtc.DataChannel, handler DataChannelHandler) {
 }
 
 func NewRTCConn(signalingUrl, roomID, signalingKey string) (*RTCConn, error) {
-	conn, err := Dial(signalingUrl, roomID, signalingKey)
+	conn, err := ayame.Dial(signalingUrl, roomID, signalingKey)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +76,10 @@ func NewRTCConn(signalingUrl, roomID, signalingKey string) (*RTCConn, error) {
 		return nil, err
 	}
 	return &RTCConn{ayameConn: conn, PC: peerConnection}, nil
+}
+
+func (c *RTCConn) IsExistRoom() bool {
+	return c.ayameConn.AuthResult.IsExistClient
 }
 
 // AddTrack/CreateDataChannel shoudl be done before Start()

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/binzume/webrtcfs/rtcfs"
+	"github.com/binzume/webrtcfs/socfs"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -56,67 +58,24 @@ func loadConfig(confPath string) *Config {
 	return config
 }
 
-func PublishFiles(ctx context.Context, config *Config) error {
-	roomID := config.RoomIdPrefix + config.RoomName + ".1"
-	log.Println("waiting for connect: ", roomID)
-
-	authorized := config.AuthToken == ""
-
-	rtcConn, err := NewRTCConn(config.SignalingUrl, roomID, config.SignalingKey)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := rtcConn.Close(); err != nil {
-			log.Printf("cannot close peerConnection: %v\n", err)
+func publishFiles(ctx context.Context, config *Config, options *rtcfs.ConnectOptions) error {
+	if config.ThumbnailCacheDir != "" {
+		socfs.DefaultThumbnailer.Register(socfs.NewImageThumbnailer(config.ThumbnailCacheDir))
+		if config.FFmpegPath != "" {
+			socfs.DefaultThumbnailer.Register(socfs.NewVideoThumbnailer(config.ThumbnailCacheDir, config.FFmpegPath))
 		}
-	}()
+	}
 
-	fsys := NewWritableDirFS(config.LocalPath)
+	fsys := socfs.NewWritableDirFS(config.LocalPath)
 	if !config.Writable {
 		fsys.Capability().Create = false
 		fsys.Capability().Remove = false
 		fsys.Capability().Write = false
 	}
-	fileHander := NewFSServer(fsys, 8)
-
-	dataChannels := []DataChannelHandler{&DataChannelCallback{
-		Name: "fileServer",
-		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
-			if !authorized {
-				// TODO: error response
-				return
-			}
-			fileHander.HandleMessage(ctx, msg.Data, msg.IsString, func(res *FileOperationResult) error {
-				if res.IsJSON() {
-					return d.SendText(string(res.ToBytes()))
-				} else {
-					return d.Send(res.ToBytes())
-				}
-			})
-		},
-	}, &DataChannelCallback{
-		Name: "controlEvent",
-		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
-			var auth struct {
-				Type  string `json:"type"`
-				Token string `json:"token"`
-			}
-			_ = json.Unmarshal(msg.Data, &auth)
-			if auth.Type == "auth" {
-				authorized = authorized || auth.Token == config.AuthToken
-				j, _ := json.Marshal(map[string]interface{}{
-					"type":   "authResult",
-					"result": authorized,
-				})
-				d.SendText(string(j))
-			}
-		},
-	}}
-
-	rtcConn.Start(dataChannels)
-	return rtcConn.Wait(ctx)
+	log.Println("connecting... ", options.RoomID)
+	return rtcfs.Publish(ctx, options, fsys)
 }
+
 func Pairing(ctx context.Context, config *Config) error {
 	pin, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
@@ -128,16 +87,16 @@ func Pairing(ctx context.Context, config *Config) error {
 	pinstr := fmt.Sprintf("%06d", pin)
 	log.Println("PIN: ", pinstr)
 
-	rtcConn, err := NewRTCConn(config.SignalingUrl, config.PairingRoomIdPrefix+pinstr, config.SignalingKey)
+	rtcConn, err := rtcfs.NewRTCConn(config.SignalingUrl, config.PairingRoomIdPrefix+pinstr, config.SignalingKey)
 	if err != nil {
 		return err
 	}
 	defer rtcConn.Close()
-	if rtcConn.ayameConn.AuthResult.IsExistClient {
+	if rtcConn.IsExistRoom() {
 		return errors.New("room already used")
 	}
 
-	dataChannels := []DataChannelHandler{&DataChannelCallback{
+	dataChannels := []rtcfs.DataChannelHandler{&rtcfs.DataChannelCallback{
 		Name: "secretExchange",
 		OnOpenFunc: func(dc *webrtc.DataChannel) {
 			j, _ := json.Marshal(map[string]interface{}{
@@ -185,11 +144,11 @@ func main() {
 		config.Writable = *writable
 	}
 
-	if config.ThumbnailCacheDir != "" {
-		DefaultThumbnailer.Register(NewImageThumbnailer(config.ThumbnailCacheDir))
-		if config.FFmpegPath != "" {
-			DefaultThumbnailer.Register(NewVideoThumbnailer(config.ThumbnailCacheDir, config.FFmpegPath))
-		}
+	options := &rtcfs.ConnectOptions{
+		SignalingURL: config.SignalingUrl,
+		SignalingKey: config.SignalingKey,
+		RoomID:       config.RoomIdPrefix + config.RoomName + ".1",
+		AuthToken:    config.AuthToken,
 	}
 
 	switch flag.Arg(0) {
@@ -199,18 +158,18 @@ func main() {
 			log.Println(err)
 		}
 	case "shell":
-		err := StartShell(context.Background(), config)
+		err := rtcfs.StartShell(context.Background(), options)
 		if err != nil {
 			log.Println(err)
 		}
 	case "pull", "push", "ls", "cat", "rm":
-		err := ShellExec(context.Background(), config, flag.Arg(0), flag.Arg(1))
+		err := rtcfs.ShellExec(context.Background(), options, flag.Arg(0), flag.Arg(1))
 		if err != nil {
 			log.Println(err)
 		}
 	case "publish", "":
 		for {
-			err := PublishFiles(context.Background(), config)
+			err := publishFiles(context.Background(), config, options)
 			if err != nil {
 				log.Println("ERROR:", err)
 			}

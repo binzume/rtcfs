@@ -1,9 +1,8 @@
-package main
+package rtcfs
 
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,104 +12,14 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 
-	"github.com/pion/webrtc/v3"
+	"github.com/binzume/webrtcfs/socfs"
 )
-
-func getClinet(ctx context.Context, config *Config) (*RTCConn, *FSClient, error) {
-	roomID := config.RoomIdPrefix + config.RoomName + ".1"
-	return getClinetInternal(ctx, config, roomID, 0)
-}
-
-func getClinetInternal(ctx context.Context, config *Config, roomID string, redirectCount int) (*RTCConn, *FSClient, error) {
-	log.Println("waiting for connect: ", roomID)
-	var client *FSClient
-	authorized := config.AuthToken == ""
-
-	rtcConn, err := NewRTCConn(config.SignalingUrl, roomID, config.SignalingKey)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	if config.AuthToken != "" {
-		wg.Add(1)
-	}
-
-	var redirect string
-
-	dataChannels := []DataChannelHandler{&DataChannelCallback{
-		Name: "fileServer",
-		OnOpenFunc: func(dc *webrtc.DataChannel) {
-			client = NewFSClient(func(req *FileOperationRequest) error {
-				return dc.SendText(string(req.ToBytes()))
-			})
-			wg.Done()
-		},
-		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
-			if client != nil {
-				client.HandleMessage(msg.Data, msg.IsString)
-			}
-		},
-		OnCloseFunc: func(d *webrtc.DataChannel) {
-			client.Abort()
-		},
-	}, &DataChannelCallback{
-		Name: "controlEvent",
-		OnOpenFunc: func(d *webrtc.DataChannel) {
-			if config.AuthToken != "" {
-				j, _ := json.Marshal(map[string]interface{}{
-					"type":  "auth",
-					"token": config.AuthToken,
-				})
-				d.SendText(string(j))
-			}
-		},
-		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
-			var event struct {
-				Type   string `json:"type"`
-				Result bool   `json:"result"`
-				RoomID string `json:"roomId"`
-			}
-			_ = json.Unmarshal(msg.Data, &event)
-			if event.Type == "authResult" {
-				authorized = event.Result
-				wg.Done()
-			} else if event.Type == "redirect" {
-				redirect = event.RoomID
-				wg.Done()
-			}
-		},
-	}}
-
-	rtcConn.Start(dataChannels)
-
-	log.Println("connectiong...")
-	wg.Wait()
-
-	if redirect != "" {
-		rtcConn.Close()
-		log.Println("redirect to roomId:", redirect)
-		if redirectCount > 3 {
-			return nil, nil, errors.New("too may redirect")
-		}
-		return getClinetInternal(ctx, config, redirect, redirectCount+1)
-	}
-
-	log.Println("connected! ", authorized)
-	if !authorized {
-		rtcConn.Close()
-		return nil, nil, errors.New("auth error")
-	}
-	return rtcConn, client, nil
-}
 
 func shellListFiles(ctx context.Context, fsys fs.FS, cwd, arg string) error {
 	printInfo := func(d fs.DirEntry, path string) {
 		finfo, _ := d.Info()
-		ent := NewFileEntry(finfo, true)
+		ent := socfs.NewFileEntry(finfo, true)
 		fmt.Println(ent.Mode(), "\t", ent.Size(), "\t", ent.Type, "\t", path)
 	}
 	fpath := path.Join(cwd, arg)
@@ -119,7 +28,7 @@ func shellListFiles(ctx context.Context, fsys fs.FS, cwd, arg string) error {
 			printInfo(d, path)
 			return err
 		})
-	} else if fsys, ok := fsys.(OpenDirFS); ok {
+	} else if fsys, ok := fsys.(socfs.OpenDirFS); ok {
 		dir, err := fsys.OpenDir(fpath)
 		if err != nil {
 			return err
@@ -184,7 +93,7 @@ func shellPullFile(ctx context.Context, fsys fs.FS, cwd, arg string) error {
 	return err
 }
 
-func shellPushFile(ctx context.Context, fsys *FSClient, cwd, arg string) error {
+func shellPushFile(ctx context.Context, fsys *socfs.FSClient, cwd, arg string) error {
 	r, err := os.Open(arg)
 	if err != nil {
 		return err
@@ -206,7 +115,7 @@ func shellPushFile(ctx context.Context, fsys *FSClient, cwd, arg string) error {
 	return err
 }
 
-func shellExecCmd(ctx context.Context, client *FSClient, cwd, cmd, arg string) error {
+func shellExecCmd(ctx context.Context, client *socfs.FSClient, cwd, cmd, arg string) error {
 	switch cmd {
 	case "":
 		return nil
@@ -231,8 +140,8 @@ func shellExecCmd(ctx context.Context, client *FSClient, cwd, cmd, arg string) e
 	}
 }
 
-func ShellExec(ctx context.Context, config *Config, cmd, arg string) error {
-	rtcConn, client, err := getClinet(ctx, config)
+func ShellExec(ctx context.Context, options *ConnectOptions, cmd, arg string) error {
+	rtcConn, client, err := GetClinet(ctx, options, &ClientOptions{MaxRedirect: 3})
 	if err != nil {
 		return err
 	}
@@ -240,8 +149,8 @@ func ShellExec(ctx context.Context, config *Config, cmd, arg string) error {
 	return shellExecCmd(ctx, client, "/", cmd, arg)
 }
 
-func StartShell(ctx context.Context, config *Config) error {
-	rtcConn, client, err := getClinet(ctx, config)
+func StartShell(ctx context.Context, options *ConnectOptions) error {
+	rtcConn, client, err := GetClinet(ctx, options, &ClientOptions{MaxRedirect: 3})
 	if err != nil {
 		return err
 	}
