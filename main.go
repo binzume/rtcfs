@@ -7,14 +7,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"io/fs"
 	"log"
 	"math/big"
 	"os"
-	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -31,6 +26,8 @@ type Config struct {
 	RoomName  string
 	AuthToken string
 	LocalPath string
+
+	Writable bool
 
 	ThumbnailCacheDir string
 	FFmpegPath        string
@@ -75,7 +72,13 @@ func PublishFiles(ctx context.Context, config *Config) error {
 		}
 	}()
 
-	fileHander := NewFSServer(os.DirFS(config.LocalPath), 8)
+	fsys := NewWritableDirFS(config.LocalPath)
+	if !config.Writable {
+		fsys.Capability().Create = false
+		fsys.Capability().Remove = false
+		fsys.Capability().Write = false
+	}
+	fileHander := NewFSServer(fsys, 8)
 
 	dataChannels := []DataChannelHandler{&DataChannelCallback{
 		Name: "fileServer",
@@ -114,155 +117,6 @@ func PublishFiles(ctx context.Context, config *Config) error {
 	rtcConn.Start(dataChannels)
 	return rtcConn.Wait(ctx)
 }
-
-func getClinet(ctx context.Context, config *Config) (*RTCConn, *FSClient, error) {
-	roomID := config.RoomIdPrefix + config.RoomName + ".1"
-	return getClinetInternal(ctx, config, roomID, 0)
-}
-
-func getClinetInternal(ctx context.Context, config *Config, roomID string, redirectCount int) (*RTCConn, *FSClient, error) {
-	log.Println("waiting for connect: ", roomID)
-	var client *FSClient
-	authorized := config.AuthToken == ""
-
-	rtcConn, err := NewRTCConn(config.SignalingUrl, roomID, config.SignalingKey)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	if config.AuthToken != "" {
-		wg.Add(1)
-	}
-
-	var redirect string
-
-	dataChannels := []DataChannelHandler{&DataChannelCallback{
-		Name: "fileServer",
-		OnOpenFunc: func(dc *webrtc.DataChannel) {
-			client = NewFSClient(func(req *FileOperationRequest) error {
-				return dc.SendText(string(req.ToBytes()))
-			})
-			wg.Done()
-		},
-		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
-			if client != nil {
-				client.HandleMessage(msg.Data, msg.IsString)
-			}
-		},
-		OnCloseFunc: func(d *webrtc.DataChannel) {
-			client.Abort()
-		},
-	}, &DataChannelCallback{
-		Name: "controlEvent",
-		OnOpenFunc: func(d *webrtc.DataChannel) {
-			if config.AuthToken != "" {
-				j, _ := json.Marshal(map[string]interface{}{
-					"type":  "auth",
-					"token": config.AuthToken,
-				})
-				d.SendText(string(j))
-			}
-		},
-		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
-			var event struct {
-				Type   string `json:"type"`
-				Result bool   `json:"result"`
-				RoomID string `json:"roomId"`
-			}
-			_ = json.Unmarshal(msg.Data, &event)
-			if event.Type == "authResult" {
-				authorized = event.Result
-				wg.Done()
-			} else if event.Type == "redirect" {
-				redirect = event.RoomID
-				wg.Done()
-			}
-		},
-	}}
-
-	rtcConn.Start(dataChannels)
-
-	log.Println("connectiong...")
-	wg.Wait()
-
-	if redirect != "" {
-		rtcConn.Close()
-		log.Println("redirect to roomId:", redirect)
-		if redirectCount > 3 {
-			return nil, nil, errors.New("too may redirect")
-		}
-		return getClinetInternal(ctx, config, redirect, redirectCount+1)
-	}
-
-	log.Println("connected! ", authorized)
-	if !authorized {
-		rtcConn.Close()
-		return nil, nil, errors.New("auth error")
-	}
-	return rtcConn, client, nil
-}
-
-func ListFiles(ctx context.Context, config *Config, path string) error {
-	rtcConn, client, err := getClinet(ctx, config)
-	if err != nil {
-		return err
-	}
-	defer rtcConn.Close()
-	if strings.HasSuffix(path, "/**") {
-		return fs.WalkDir(client, strings.TrimSuffix(path, "/**"), func(path string, d fs.DirEntry, err error) error {
-			finfo, _ := d.Info()
-			ent := NewFileEntry(finfo, true)
-			fmt.Println(ent.Mode(), "\t", ent.Size(), "\t", ent.Type, "\t", path)
-			return err
-		})
-	} else {
-		dir, err := client.OpenDir(path)
-		if err != nil {
-			return err
-		}
-		for {
-			files, err := dir.ReadDir(200)
-			for _, file := range files {
-				finfo, _ := file.Info()
-				ent := NewFileEntry(finfo, true)
-				fmt.Println(ent.Mode(), "\t", ent.Size(), "\t", ent.Type, "\t", ent.Name())
-			}
-			if err != nil {
-				break
-			}
-		}
-	}
-
-	return err
-}
-
-func pullFile(ctx context.Context, config *Config, path string) error {
-	rtcConn, client, err := getClinet(ctx, config)
-	if err != nil {
-		return err
-	}
-	defer rtcConn.Close()
-	stat, err := client.Stat(path)
-	if err != nil {
-		return err
-	}
-	log.Println("Size: ", stat.Size())
-	r, err := client.Open(path)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-	w, err := os.Create(filepath.Base(path))
-	if err != nil {
-		return err
-	}
-	defer w.Close()
-	_, err = io.Copy(w, r)
-	return err
-}
-
 func Pairing(ctx context.Context, config *Config) error {
 	pin, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
@@ -314,6 +168,7 @@ func main() {
 	roomName := flag.String("room", "", "Ayame room name")
 	authToken := flag.String("token", "", "auth token")
 	localPath := flag.String("path", ".", "local path to share")
+	writable := flag.Bool("writable", false, "writable fs")
 	flag.Parse()
 
 	config := loadConfig(*confPath)
@@ -325,6 +180,9 @@ func main() {
 	}
 	if *authToken != "" {
 		config.AuthToken = *authToken
+	}
+	if *writable {
+		config.Writable = *writable
 	}
 
 	if config.ThumbnailCacheDir != "" {
@@ -340,13 +198,13 @@ func main() {
 		if err != nil {
 			log.Println(err)
 		}
-	case "ls":
-		err := ListFiles(context.Background(), config, flag.Arg(1))
+	case "shell":
+		err := StartShell(context.Background(), config)
 		if err != nil {
 			log.Println(err)
 		}
-	case "pull":
-		err := pullFile(context.Background(), config, flag.Arg(1))
+	case "pull", "ls":
+		err := ShellExec(context.Background(), config, flag.Arg(0), flag.Arg(1))
 		if err != nil {
 			log.Println(err)
 		}
