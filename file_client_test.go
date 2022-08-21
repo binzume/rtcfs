@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-func newFakeClient() *FSClient {
+func newFakeClient(fsys fs.FS) *FSClient {
 	ctx := context.Background()
 	// Connect server and client directly
 	var client *FSClient
-	server := NewFSServer(os.DirFS("testdata"), 1)
+	server := NewFSServer(fsys, 1)
 	client = NewFSClient(func(req *FileOperationRequest) error {
 		return server.HandleMessage(ctx, req.ToBytes(), true, func(res *FileOperationResult) error {
 			return client.HandleMessage(res.ToBytes(), res.IsJSON())
@@ -22,7 +22,7 @@ func newFakeClient() *FSClient {
 }
 
 func TestFSClient_Dir(t *testing.T) {
-	client := newFakeClient()
+	client := newFakeClient(os.DirFS("testdata"))
 	defer client.Abort()
 
 	files, err := client.ReadDir("/")
@@ -35,11 +35,10 @@ func TestFSClient_Dir(t *testing.T) {
 		t.Fatal("Open() dir error: ", err)
 	}
 	f.Close()
-
 }
 
 func TestFSClient_Stat(t *testing.T) {
-	client := newFakeClient()
+	client := newFakeClient(os.DirFS("testdata"))
 	defer client.Abort()
 
 	// Dir
@@ -83,15 +82,10 @@ func TestFSClient_Stat(t *testing.T) {
 }
 
 func TestFSClient_File(t *testing.T) {
-	client := newFakeClient()
+	client := newFakeClient(os.DirFS("testdata"))
 	defer client.Abort()
 
 	fname := "/test.png"
-
-	stat, err := client.Stat(fname)
-	if err != nil {
-		t.Fatal("Stat() file error: ", err)
-	}
 
 	f, err := client.Open(fname)
 	if err != nil || f == nil {
@@ -99,11 +93,75 @@ func TestFSClient_File(t *testing.T) {
 	}
 	f.Close()
 
+	stat, err := f.Stat()
+	if err != nil {
+		t.Fatal("Stat() file error: ", err)
+	}
+
 	data, err := fs.ReadFile(client, fname)
 	if err != nil {
 		t.Error("ReadFile() error: ", err)
 	}
 	if len(data) != int(stat.Size()) {
 		t.Error("ReadFile() size error: ", len(data), stat.Size())
+	}
+}
+
+func TestFSClient_Write(t *testing.T) {
+	fsys := NewWritableDirFS("testdata")
+	client := newFakeClient(fsys)
+	defer client.Abort()
+
+	fname := "test.txt"
+
+	// Create and Write
+	w, err := client.Create(fname)
+	if err != nil {
+		t.Fatal("Failed to truncate", err)
+	}
+	w.Write([]byte("Hello!"))
+	w.Close()
+
+	stat, err := client.Stat(fname)
+	if err != nil {
+		t.Fatal("Stat() file error: ", err)
+	}
+	if stat.Size() != int64(len("Hello!")) {
+		t.Fatal("Size error ", stat.Size())
+	}
+
+	// Truncate
+	err = client.Truncate(fname, 0)
+	if err != nil {
+		t.Fatal("Failed to truncate", err)
+	}
+
+	stat, err = client.Stat(fname)
+	if err != nil {
+		t.Fatal("Stat() file error: ", err)
+	}
+	if stat.Size() != 0 {
+		t.Fatal("Size error ", stat.Size())
+	}
+
+	// Remove
+	err = client.Remove(fname)
+	if err != nil {
+		t.Fatal("Failed to remove", err)
+	}
+
+	stat, err = client.Stat(fname)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("Stat() should be ErrNotExist: ", err)
+	}
+
+	// Readonly
+	fsys.Capability().Create = false
+	fsys.Capability().Remove = false
+	fsys.Capability().Write = false
+
+	err = client.Truncate(fname, 0)
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Fatal("truncate should be failed with permission error: ", err)
 	}
 }

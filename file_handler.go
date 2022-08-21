@@ -189,6 +189,10 @@ func errorToStr(err error) string {
 		return "EOF"
 	} else if errors.Is(err, fs.ErrNotExist) {
 		return "noent"
+	} else if errors.Is(err, fs.ErrClosed) {
+		return "closed"
+	} else if errors.Is(err, fs.ErrPermission) {
+		return "permission error"
 	}
 	return fmt.Sprint(err)
 }
@@ -255,7 +259,7 @@ func (h *FSServer) readThumbnail(srcPath string, pos int64, len int) ([]byte, er
 func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 	switch op.Op {
 	case "stat":
-		stat, err := h.fsys.Stat(fixPath(op.Path))
+		stat, err := fs.Stat(h.fsys, fixPath(op.Path))
 		if err != nil {
 			return nil, err
 		}
@@ -307,7 +311,18 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			return true, nil
+			return nil, nil
+		}
+	case "truncate":
+		f, err := h.fsys.OpenWriter(fixPath(op.Path))
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		if f, ok := f.(interface{ Truncate(int64) error }); ok {
+			return nil, f.Truncate(op.Pos)
+		} else {
+			return nil, errors.New("unsupported operation")
 		}
 	case "remove":
 		return h.fsys.Remove(fixPath(op.Path)) == nil, nil

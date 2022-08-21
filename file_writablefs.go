@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"path"
 )
 
 type FSCapability struct {
@@ -14,8 +16,8 @@ type FSCapability struct {
 }
 
 type FS interface {
-	fs.StatFS
-	Capability() FSCapability
+	fs.FS
+	Capability() *FSCapability
 	OpenWriter(path string) (io.WriteCloser, error)
 	Create(path string) (io.WriteCloser, error)
 	Remove(path string) error
@@ -26,13 +28,13 @@ type wrappedFS struct {
 	cap FSCapability
 }
 
-func (w *wrappedFS) Capability() FSCapability {
-	return w.cap
+func (w *wrappedFS) Capability() *FSCapability {
+	return &w.cap
 }
 
 func (w *wrappedFS) OpenWriter(path string) (io.WriteCloser, error) {
 	if !w.cap.Write {
-		return nil, fmt.Errorf("not supported operation")
+		return nil, fs.ErrPermission
 	}
 	return w.FS.(interface {
 		OpenWriter(path string) (io.WriteCloser, error)
@@ -84,4 +86,39 @@ func Capability(fsys fs.FS) FSCapability {
 	})
 
 	return cap
+}
+
+type writableFS struct {
+	fs.FS
+	Path string
+	cap  *FSCapability
+}
+
+func NewWritableDirFS(dir string) FS {
+	return &writableFS{FS: os.DirFS(dir), Path: dir, cap: &FSCapability{true, true, true, true}}
+}
+
+func (w *writableFS) Capability() *FSCapability {
+	return w.cap
+}
+
+func (fsys *writableFS) Create(name string) (io.WriteCloser, error) {
+	if !fsys.cap.Create {
+		return nil, fs.ErrPermission
+	}
+	return os.Create(path.Join(fsys.Path, name))
+}
+
+func (fsys *writableFS) Remove(name string) error {
+	if !fsys.cap.Remove {
+		return fs.ErrPermission
+	}
+	return os.Remove(path.Join(fsys.Path, name))
+}
+
+func (fsys *writableFS) OpenWriter(name string) (io.WriteCloser, error) {
+	if !fsys.cap.Write {
+		return nil, fs.ErrPermission
+	}
+	return os.OpenFile(path.Join(fsys.Path, name), os.O_RDWR|os.O_CREATE, fs.ModePerm)
 }

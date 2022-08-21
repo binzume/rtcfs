@@ -56,6 +56,10 @@ func (c *FSClient) request(req *FileOperationRequest) (*FileOperationResult, err
 			return res, io.EOF
 		case "noent":
 			return res, fs.ErrNotExist
+		case "closed":
+			return res, fs.ErrClosed
+		case "permission error":
+			return res, fs.ErrPermission
 		default:
 			return res, errors.New(res.Error)
 		}
@@ -108,6 +112,7 @@ func (c *FSClient) ReadDir(name string) ([]fs.DirEntry, error) {
 }
 
 type OpenDirFS interface {
+	fs.FS
 	OpenDir(name string) (fs.ReadDirFile, error)
 }
 
@@ -146,6 +151,20 @@ func (c *FSClient) ReadDirRange(name string, pos, limit int) ([]fs.DirEntry, err
 	return entries, nil
 }
 
+func (c *FSClient) Create(name string) (io.WriteCloser, error) {
+	return &clientFile{c: c, name: name}, nil
+}
+
+func (c *FSClient) Remove(name string) error {
+	_, err := c.request(&FileOperationRequest{Op: "remove", Path: name})
+	return err
+}
+
+func (c *FSClient) Truncate(name string, size int64) error {
+	_, err := c.request(&FileOperationRequest{Op: "truncate", Path: name, Pos: size})
+	return err
+}
+
 type clientDirEnt struct {
 	*FileEntry
 }
@@ -180,6 +199,28 @@ func (f *clientFile) Read(b []byte) (int, error) {
 		err = io.EOF
 	}
 	return l, err
+}
+
+func (f *clientFile) Truncate(size int64) error {
+	return f.c.Truncate(f.name, size)
+}
+
+func (f *clientFile) Write(b []byte) (int, error) {
+	n := 0
+	for len(b) > 0 {
+		l := len(b)
+		if l > f.c.MaxReadSize {
+			l = f.c.MaxReadSize
+		}
+		_, err := f.c.request(&FileOperationRequest{Op: "write", Path: f.name, Pos: f.pos, Buf: b[:l]})
+		if err != nil {
+			return n, err
+		}
+		n += l
+		f.pos += int64(l)
+		b = b[l:]
+	}
+	return n, nil
 }
 
 func (f *clientFile) Close() error {
