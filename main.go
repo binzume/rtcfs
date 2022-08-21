@@ -117,6 +117,10 @@ func PublishFiles(ctx context.Context, config *Config) error {
 
 func getClinet(ctx context.Context, config *Config) (*RTCConn, *FSClient, error) {
 	roomID := config.RoomIdPrefix + config.RoomName + ".1"
+	return getClinetInternal(ctx, config, roomID, 0)
+}
+
+func getClinetInternal(ctx context.Context, config *Config, roomID string, redirectCount int) (*RTCConn, *FSClient, error) {
 	log.Println("waiting for connect: ", roomID)
 	var client *FSClient
 	authorized := config.AuthToken == ""
@@ -131,6 +135,8 @@ func getClinet(ctx context.Context, config *Config) (*RTCConn, *FSClient, error)
 	if config.AuthToken != "" {
 		wg.Add(1)
 	}
+
+	var redirect string
 
 	dataChannels := []DataChannelHandler{&DataChannelCallback{
 		Name: "fileServer",
@@ -163,16 +169,15 @@ func getClinet(ctx context.Context, config *Config) (*RTCConn, *FSClient, error)
 			var event struct {
 				Type   string `json:"type"`
 				Result bool   `json:"result"`
-				RoomID bool   `json:"roomId"`
+				RoomID string `json:"roomId"`
 			}
 			_ = json.Unmarshal(msg.Data, &event)
 			if event.Type == "authResult" {
 				authorized = event.Result
 				wg.Done()
 			} else if event.Type == "redirect" {
-				log.Println("TODO: Support redirect event. (roomId:", event.RoomID)
+				redirect = event.RoomID
 				wg.Done()
-				rtcConn.Close()
 			}
 		},
 	}}
@@ -181,6 +186,16 @@ func getClinet(ctx context.Context, config *Config) (*RTCConn, *FSClient, error)
 
 	log.Println("connectiong...")
 	wg.Wait()
+
+	if redirect != "" {
+		rtcConn.Close()
+		log.Println("redirect to roomId:", redirect)
+		if redirectCount > 3 {
+			return nil, nil, errors.New("too may redirect")
+		}
+		return getClinetInternal(ctx, config, redirect, redirectCount+1)
+	}
+
 	log.Println("connected! ", authorized)
 	if !authorized {
 		rtcConn.Close()
@@ -191,6 +206,9 @@ func getClinet(ctx context.Context, config *Config) (*RTCConn, *FSClient, error)
 
 func ListFiles(ctx context.Context, config *Config, path string) error {
 	rtcConn, client, err := getClinet(ctx, config)
+	if err != nil {
+		return err
+	}
 	defer rtcConn.Close()
 	if strings.HasSuffix(path, "/**") {
 		return fs.WalkDir(client, strings.TrimSuffix(path, "/**"), func(path string, d fs.DirEntry, err error) error {
@@ -222,6 +240,9 @@ func ListFiles(ctx context.Context, config *Config, path string) error {
 
 func pullFile(ctx context.Context, config *Config, path string) error {
 	rtcConn, client, err := getClinet(ctx, config)
+	if err != nil {
+		return err
+	}
 	defer rtcConn.Close()
 	stat, err := client.Stat(path)
 	if err != nil {
