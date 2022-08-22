@@ -58,11 +58,6 @@ func shellListFiles(ctx context.Context, fsys fs.FS, cwd, arg string) error {
 
 func shellCat(ctx context.Context, fsys fs.FS, cwd, arg string) error {
 	fpath := path.Join(cwd, arg)
-	stat, err := fs.Stat(fsys, fpath)
-	if err != nil {
-		return err
-	}
-	log.Println("Pull: ", fpath, " (", stat.Size(), "B)")
 	r, err := fsys.Open(fpath)
 	if err != nil {
 		return err

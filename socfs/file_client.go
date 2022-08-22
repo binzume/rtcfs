@@ -170,7 +170,7 @@ type clientDirEnt struct {
 }
 
 func (f *clientDirEnt) Type() fs.FileMode {
-	return f.Mode()
+	return f.Mode().Type()
 }
 
 func (f *clientDirEnt) Info() (fs.FileInfo, error) {

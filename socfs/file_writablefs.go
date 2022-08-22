@@ -61,6 +61,10 @@ func (w *wrappedFS) Stat(name string) (fs.FileInfo, error) {
 	return fs.Stat(w.FS, name)
 }
 
+func (w *wrappedFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	return fs.ReadDir(w.FS, name)
+}
+
 func WrapFS(fsys fs.FS) FS {
 	if fsys, ok := fsys.(FS); ok {
 		return fsys
