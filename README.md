@@ -16,7 +16,7 @@ go install github.com/binzume/webrtcfs@latest
 ### ファイルを共有
 
 ```bash
-webrtcfs -room RoomName -path /dir/to/share
+webrtcfs -room RoomName publish /dir/to/share
 ```
 
 ### クライアント

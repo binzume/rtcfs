@@ -39,6 +39,7 @@ func DefaultConfig() *Config {
 	config.PairingRoomIdPrefix = "binzume@rdp-pin-"
 	config.PairingTimeoutSec = 600
 	config.ThumbnailCacheDir = "cache"
+	config.FFmpegPath = os.Getenv("FFMPEG_PATH")
 	return &config
 }
 
@@ -76,14 +77,10 @@ func main() {
 	confPath := flag.String("conf", "config.toml", "conf path")
 	roomName := flag.String("room", "", "Ayame room name")
 	authToken := flag.String("token", "", "auth token")
-	localPath := flag.String("path", ".", "local path to share")
 	writable := flag.Bool("writable", false, "writable fs")
 	flag.Parse()
 
 	config := loadConfig(*confPath)
-	if *localPath != "" {
-		config.LocalPath = *localPath
-	}
 	if *roomName != "" {
 		config.RoomName = *roomName
 	}
@@ -121,7 +118,10 @@ func main() {
 		if err != nil {
 			log.Println(err)
 		}
-	case "publish", "":
+	case "publish":
+		if flag.Arg(1) != "" {
+			config.LocalPath = flag.Arg(1)
+		}
 		for {
 			err := publishFiles(context.Background(), config, options)
 			if err != nil {
