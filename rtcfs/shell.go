@@ -100,7 +100,7 @@ func shellPushFile(ctx context.Context, fsys *socfs.FSClient, cwd, arg string) e
 	}
 	log.Println("Push: ", arg, " (", stat.Size(), "B)")
 
-	fpath := path.Join(cwd, path.Base(arg))
+	fpath := path.Join(cwd, filepath.Base(arg))
 	w, err := fsys.Create(fpath)
 	if err != nil {
 		return err
@@ -155,7 +155,10 @@ func StartShell(ctx context.Context, options *ConnectOptions) error {
 	shellExecCmd(ctx, client, cwd, "help", "")
 	s := bufio.NewScanner(os.Stdin)
 	for s.Scan() {
-		cmd := strings.SplitN(s.Text(), " ", 2)
+		cmd := strings.Fields(s.Text())
+		if len(cmd) == 0 {
+			continue
+		}
 		arg := ""
 		if len(cmd) > 1 {
 			arg = cmd[1]
