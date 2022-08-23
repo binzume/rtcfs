@@ -1,7 +1,6 @@
 package socfs
 
 import (
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -43,14 +42,14 @@ func (w *wrappedFS) OpenWriter(path string) (io.WriteCloser, error) {
 
 func (w *wrappedFS) Remove(path string) error {
 	if !w.cap.Remove {
-		return fmt.Errorf("not supported operation")
+		return fs.ErrPermission
 	}
 	return w.FS.(interface{ Remove(path string) error }).Remove(path)
 }
 
 func (w *wrappedFS) Create(path string) (io.WriteCloser, error) {
 	if !w.cap.Create {
-		return nil, fmt.Errorf("not supported operation")
+		return nil, fs.ErrPermission
 	}
 	return w.FS.(interface {
 		Create(path string) (io.WriteCloser, error)

@@ -160,8 +160,18 @@ func TestFSClient_Write(t *testing.T) {
 	fsys.Capability().Remove = false
 	fsys.Capability().Write = false
 
+	_, err = client.Create(fname)
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Fatal("Create() should be failed with permission error: ", err)
+	}
+
+	err = client.Remove("test.png")
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Fatal("Remove() should be failed with permission error: ", err)
+	}
+
 	err = client.Truncate(fname, 0)
 	if !errors.Is(err, fs.ErrPermission) {
-		t.Fatal("truncate should be failed with permission error: ", err)
+		t.Fatal("Truncate() should be failed with permission error: ", err)
 	}
 }

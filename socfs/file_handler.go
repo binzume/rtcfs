@@ -325,7 +325,8 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 			return nil, errors.New("unsupported operation")
 		}
 	case "remove":
-		return h.fsys.Remove(fixPath(op.Path)) == nil, nil
+		err := h.fsys.Remove(fixPath(op.Path))
+		return err == nil, err
 	}
 	return nil, errors.New("unsupported operation")
 }

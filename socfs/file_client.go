@@ -152,6 +152,10 @@ func (c *FSClient) ReadDirRange(name string, pos, limit int) ([]fs.DirEntry, err
 }
 
 func (c *FSClient) Create(name string) (io.WriteCloser, error) {
+	err := c.Truncate(name, 0)
+	if err != nil {
+		return nil, err
+	}
 	return &clientFile{c: c, name: name}, nil
 }
 
@@ -183,10 +187,12 @@ type clientFile struct {
 	pos  int64
 }
 
+// fs.File
 func (f *clientFile) Stat() (fs.FileInfo, error) {
 	return f.c.Stat(f.name)
 }
 
+// fs.File, io.Reader
 func (f *clientFile) Read(b []byte) (int, error) {
 	sz := len(b)
 	if sz > f.c.MaxReadSize {
@@ -201,28 +207,50 @@ func (f *clientFile) Read(b []byte) (int, error) {
 	return l, err
 }
 
-func (f *clientFile) Truncate(size int64) error {
-	return f.c.Truncate(f.name, size)
+// io.ReaderAt
+func (f *clientFile) ReadAt(b []byte, off int64) (int, error) {
+	f.pos = off
+	read := 0
+	for read < len(b) {
+		n, err := f.Read(b[read:])
+		read += n
+		if err != nil {
+			return read, err
+		}
+	}
+	return read, nil
 }
 
+// io.Writer
 func (f *clientFile) Write(b []byte) (int, error) {
-	n := 0
+	return f.WriteAt(b, f.pos)
+}
+
+// io.WriterAt
+func (f *clientFile) WriteAt(b []byte, off int64) (int, error) {
+	wrote := 0
 	for len(b) > 0 {
 		l := len(b)
 		if l > f.c.MaxReadSize {
 			l = f.c.MaxReadSize
 		}
-		_, err := f.c.request(&FileOperationRequest{Op: "write", Path: f.name, Pos: f.pos, Buf: b[:l]})
+		_, err := f.c.request(&FileOperationRequest{Op: "write", Path: f.name, Pos: off, Buf: b[:l]})
 		if err != nil {
-			return n, err
+			return wrote, err
 		}
-		n += l
-		f.pos += int64(l)
+		wrote += l
+		off += int64(l)
 		b = b[l:]
 	}
-	return n, nil
+	f.pos = off
+	return wrote, nil
 }
 
+func (f *clientFile) Truncate(size int64) error {
+	return f.c.Truncate(f.name, size)
+}
+
+// fs.File
 func (f *clientFile) Close() error {
 	return nil
 }
