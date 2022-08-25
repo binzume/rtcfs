@@ -17,7 +17,7 @@ type FSCapability struct {
 type FS interface {
 	fs.FS
 	Capability() *FSCapability
-	OpenWriter(path string) (io.WriteCloser, error)
+	OpenWriter(path string, flag int) (io.WriteCloser, error)
 	Create(path string) (io.WriteCloser, error)
 	Remove(path string) error
 }
@@ -31,13 +31,13 @@ func (w *wrappedFS) Capability() *FSCapability {
 	return &w.cap
 }
 
-func (w *wrappedFS) OpenWriter(path string) (io.WriteCloser, error) {
+func (w *wrappedFS) OpenWriter(path string, flag int) (io.WriteCloser, error) {
 	if !w.cap.Write {
 		return nil, fs.ErrPermission
 	}
 	return w.FS.(interface {
-		OpenWriter(path string) (io.WriteCloser, error)
-	}).OpenWriter(path)
+		OpenWriter(path string, flag int) (io.WriteCloser, error)
+	}).OpenWriter(path, flag)
 }
 
 func (w *wrappedFS) Remove(path string) error {
@@ -91,37 +91,37 @@ func Capability(fsys fs.FS) FSCapability {
 	return cap
 }
 
-type writableFS struct {
+type writableDirFS struct {
 	fs.FS
 	Path string
 	cap  *FSCapability
 }
 
 func NewWritableDirFS(dir string) FS {
-	return &writableFS{FS: os.DirFS(dir), Path: dir, cap: &FSCapability{true, true, true, true}}
+	return &writableDirFS{FS: os.DirFS(dir), Path: dir, cap: &FSCapability{true, true, true, true}}
 }
 
-func (w *writableFS) Capability() *FSCapability {
+func (w *writableDirFS) Capability() *FSCapability {
 	return w.cap
 }
 
-func (fsys *writableFS) Create(name string) (io.WriteCloser, error) {
+func (fsys *writableDirFS) Create(name string) (io.WriteCloser, error) {
 	if !fsys.cap.Create {
 		return nil, fs.ErrPermission
 	}
 	return os.Create(path.Join(fsys.Path, name))
 }
 
-func (fsys *writableFS) Remove(name string) error {
+func (fsys *writableDirFS) Remove(name string) error {
 	if !fsys.cap.Remove {
 		return fs.ErrPermission
 	}
 	return os.Remove(path.Join(fsys.Path, name))
 }
 
-func (fsys *writableFS) OpenWriter(name string) (io.WriteCloser, error) {
+func (fsys *writableDirFS) OpenWriter(name string, flag int) (io.WriteCloser, error) {
 	if !fsys.cap.Write {
 		return nil, fs.ErrPermission
 	}
-	return os.OpenFile(path.Join(fsys.Path, name), os.O_RDWR|os.O_CREATE, fs.ModePerm)
+	return os.OpenFile(path.Join(fsys.Path, name), flag, fs.ModePerm)
 }

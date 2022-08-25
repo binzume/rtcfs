@@ -169,6 +169,10 @@ func (c *FSClient) Truncate(name string, size int64) error {
 	return err
 }
 
+func (c *FSClient) OpenWriter(name string, flag int) (io.WriteCloser, error) {
+	return &clientFile{c: c, name: name}, nil
+}
+
 type clientDirEnt struct {
 	*FileEntry
 }

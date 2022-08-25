@@ -301,7 +301,7 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 			return buf[:n], nil
 		}
 	case "write":
-		f, err := h.fsys.OpenWriter(fixPath(op.Path))
+		f, err := h.fsys.OpenWriter(fixPath(op.Path), os.O_CREATE|os.O_WRONLY)
 		if err != nil {
 			return nil, err
 		}
@@ -314,7 +314,7 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 			return nil, nil
 		}
 	case "truncate":
-		f, err := h.fsys.OpenWriter(fixPath(op.Path))
+		f, err := h.fsys.OpenWriter(fixPath(op.Path), os.O_CREATE|os.O_WRONLY)
 		if err != nil {
 			return nil, err
 		}
