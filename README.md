@@ -3,6 +3,8 @@
 
 WebRTC の DataCnannel 上でファイルを共有するツールです．プロトコルは， https://github.com/binzume/webrtc-rdp 等と共通．
 
+PCで共有したフォルダをブラウザで表示したり，ブラウザで共有したフォルダをドライブとしてマウントしたりできます．
+
 ## Usage
 
 Go 1.18以降が必要です．
@@ -23,8 +25,6 @@ webrtcfs -room RoomName publish /dir/to/share
 
 とりあえずデバッグ用に作った簡易的なシェルが付いています．
 
-TODO: FUSE support.
-
 
 ```bash
 # start shell
@@ -41,6 +41,15 @@ webrtcfs -room RoomName pull remotefile.txt
 webrtcfs -room RoomName push localfile.txt
 ```
 
+
+FUSEでマウントする場合(Windowsで動きます．Linuxは実装途中)．
+
+```bash
+go install github.com/binzume/webrtcfs/cmds/mount@latest
+mount -room RoomName R:
+```
+
+`R:` ドライブが追加されて，エクスプローラーなどでアクセスできるようになります．
 
 ### ペアリング
 
