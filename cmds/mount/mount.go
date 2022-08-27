@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/BurntSushi/toml"
-	"github.com/binzume/cfs/fuse2"
+	"github.com/binzume/fsmount"
 	"github.com/binzume/webrtcfs/rtcfs"
 )
 
@@ -73,7 +73,7 @@ func main() {
 	}
 	defer rtcConn.Close()
 
-	m, _ := fuse2.MountFS(mountpoint, client, nil)
+	m, _ := fsmount.MountFS(mountpoint, client, nil)
 	defer m.Close()
 
 	select {}

@@ -4,15 +4,15 @@ go 1.19
 
 require (
 	github.com/BurntSushi/toml v1.2.0
-	github.com/binzume/cfs v0.1.1-0.20220825112219-d6996a32a32d
+	github.com/binzume/fsmount v0.1.0
 	github.com/binzume/webrtcfs v0.0.0-20220825112640-0d6671cf1f2a
 )
 
 require (
-	github.com/binzume/dkango v0.0.0-20220825110454-4f5c26ee8512 // indirect
+	github.com/binzume/dkango v0.1.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
-	github.com/hanwen/go-fuse v1.0.0 // indirect
+	github.com/hanwen/go-fuse/v2 v2.1.0 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
 	github.com/pion/dtls/v2 v2.1.5 // indirect
@@ -34,6 +34,6 @@ require (
 	golang.org/x/crypto v0.0.0-20220516162934-403b01795ae8 // indirect
 	golang.org/x/image v0.0.0-20220722155232-062f8c9fd539 // indirect
 	golang.org/x/net v0.0.0-20220630215102-69896b714898 // indirect
-	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9 // indirect
+	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a // indirect
 	golang.org/x/sys v0.0.0-20220818161305-2296e01440c6 // indirect
 )
