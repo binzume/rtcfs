@@ -1,4 +1,4 @@
-module github.com/binzume/webrtcfs/cmds/mount
+module github.com/binzume/webrtcfs/cmds/mount_webrtcfs
 
 go 1.19
 

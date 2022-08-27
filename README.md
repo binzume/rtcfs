@@ -1,13 +1,14 @@
 
-# WIP: WebRTC fs
+# WebRTC fs
 
-WebRTC の DataCnannel 上でファイルを共有するツールです．プロトコルは， https://github.com/binzume/webrtc-rdp 等と共通．
+WebRTC の DataCnannel 上でファイルを共有する実験的なファイルシステムです．
 
+プロトコルは， https://github.com/binzume/webrtc-rdp 等と共通です．
 PCで共有したフォルダをブラウザで表示したり，ブラウザで共有したフォルダをドライブとしてマウントしたりできます．
 
 ## Usage
 
-Go 1.18以降が必要です．
+Go 1.19以降が必要です．
 
 ### インストール
 
@@ -41,29 +42,28 @@ webrtcfs -room RoomName pull remotefile.txt
 webrtcfs -room RoomName push localfile.txt
 ```
 
-
-FUSEでマウントする場合(Windowsで動きます．Linuxは実装途中)．
+FUSEでマウントする場合．
 
 ```bash
-go install github.com/binzume/webrtcfs/cmds/mount@latest
-mount -room RoomName R:
+go install github.com/binzume/webrtcfs/cmds/mount_webrtcfs@latest
+mount_webrtcfs -room RoomName R:
 ```
 
 `R:` ドライブが追加されて，エクスプローラーなどでアクセスできるようになります．
+Windows以外ではマウントポイントとして使う適当なディレクトリを指定してください．
 
 ### ペアリング
 
 https://github.com/binzume/webrtc-rdp から接続するためのPINを生成します．
 
 PINが表示されるのでクライアント側に入力してください．
-仮実装です．RoomNameは秘密にする必要があるので適当なランダムっぽい名前にしてください．
 
 ```bash
 webrtcfs -room RoomName pairing
 ```
 
-RoomNameはWebRTCのシグナリングサーバを経由してしまうので，気休めとして `-token` オプションで追加のパスワードを設定できます．
-
+RoomNameは秘密にする必要があるので適当なランダムっぽい名前にしてください．
+RoomNameはWebRTCのシグナリングサーバを経由してしまうので，気休めとして `-token` オプションでデータチャンネル上で認証を行うためのパスワードを指定できます．
 
 # License
 
