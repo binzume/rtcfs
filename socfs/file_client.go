@@ -170,7 +170,11 @@ func (c *FSClient) Truncate(name string, size int64) error {
 }
 
 func (c *FSClient) OpenWriter(name string, flag int) (io.WriteCloser, error) {
-	return &clientFile{c: c, name: name}, nil
+	var err error
+	if flag&os.O_TRUNC != 0 {
+		err = c.Truncate(name, 0)
+	}
+	return &clientFile{c: c, name: name}, err
 }
 
 type clientDirEnt struct {
