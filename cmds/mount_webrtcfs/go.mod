@@ -4,12 +4,12 @@ go 1.19
 
 require (
 	github.com/BurntSushi/toml v1.2.0
-	github.com/binzume/fsmount v0.1.0
-	github.com/binzume/webrtcfs v0.0.0-20220825112640-0d6671cf1f2a
+	github.com/binzume/fsmount v0.1.2
+	github.com/binzume/webrtcfs v0.1.2-0.20220831130338-610ff1b3e67f
 )
 
 require (
-	github.com/binzume/dkango v0.1.0 // indirect
+	github.com/binzume/dkango v0.1.3 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hanwen/go-fuse/v2 v2.1.0 // indirect
