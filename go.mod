@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/BurntSushi/toml v1.2.0
+	github.com/binzume/fsmount v0.1.3
 	github.com/gorilla/websocket v1.5.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/pion/webrtc/v3 v3.1.43
@@ -12,7 +13,9 @@ require (
 )
 
 require (
+	github.com/binzume/dkango v0.1.4 // indirect
 	github.com/google/uuid v1.3.0 // indirect
+	github.com/hanwen/go-fuse/v2 v2.1.0 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
 	github.com/pion/dtls/v2 v2.1.5 // indirect
 	github.com/pion/ice/v2 v2.2.6 // indirect
