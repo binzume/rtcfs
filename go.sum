@@ -2,8 +2,12 @@ github.com/BurntSushi/toml v1.2.0 h1:Rt8g24XnyGTyglgET/PRUNlrUeu9F5L+7FilkXfZgs0
 github.com/BurntSushi/toml v1.2.0/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
 github.com/binzume/dkango v0.1.4 h1:OAHuT/u0nx/I1G3cbU4Be9RbGIYNVJvn/8TvacpBYyA=
 github.com/binzume/dkango v0.1.4/go.mod h1:i+CbTltgijANLi/+M0UHBHLvauDb39E2OA2bF4u8meo=
+github.com/binzume/dkango v0.1.5 h1:PUp48+xdQDMHdmbAUsz0VEqttxVhhBPPjAkEnUP3c14=
+github.com/binzume/dkango v0.1.5/go.mod h1:i+CbTltgijANLi/+M0UHBHLvauDb39E2OA2bF4u8meo=
 github.com/binzume/fsmount v0.1.3 h1:gphksdSixr0jtG/vM7pwxlDI7Vj3As5Yaau/mZIsT8g=
 github.com/binzume/fsmount v0.1.3/go.mod h1:nDj8HOgYNdzX7BfMOq+AonNfFxR3WpkyBfLfXW41kWM=
+github.com/binzume/fsmount v0.1.4 h1:FFq8jHRymgUbUKvNigk6f4wkH1UCNs5MAmzO4g1IXBI=
+github.com/binzume/fsmount v0.1.4/go.mod h1:WUxbKze0MlOakfm4j5g5i5bsF9197bpmVbl3JIlaoog=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
