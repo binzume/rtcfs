@@ -55,13 +55,15 @@ func (c *FSClient) request(req *FileOperationRequest) (*FileOperationResult, err
 		case "EOF":
 			return res, io.EOF
 		case "noent":
-			return res, fs.ErrNotExist
+			return res, &fs.PathError{Op: req.Op, Path: req.Path, Err: fs.ErrNotExist}
 		case "closed":
-			return res, fs.ErrClosed
+			return res, &fs.PathError{Op: req.Op, Path: req.Path, Err: fs.ErrClosed}
 		case "permission error":
-			return res, fs.ErrPermission
+			return res, &fs.PathError{Op: req.Op, Path: req.Path, Err: fs.ErrPermission}
+		case "invalid argument":
+			return res, &fs.PathError{Op: req.Op, Path: req.Path, Err: fs.ErrInvalid}
 		default:
-			return res, errors.New(res.Error)
+			return res, &fs.PathError{Op: req.Op, Path: req.Path, Err: errors.New(res.Error)}
 		}
 	}
 	return res, nil
@@ -78,7 +80,7 @@ func (c *FSClient) HandleMessage(data []byte, isjson bool) error {
 			return errors.New("invalid binary msssage type")
 		}
 		res.RID = float64(binary.LittleEndian.Uint32(data[4:]))
-		res.binData = data[8:]
+		res.Buf = data[8:]
 	}
 	rid := uint32(res.RID.(float64))
 	c.locker.Lock()
@@ -109,11 +111,6 @@ func (c *FSClient) Stat(name string) (fs.FileInfo, error) {
 // fs.ReadDirFS
 func (c *FSClient) ReadDir(name string) ([]fs.DirEntry, error) {
 	return c.ReadDirRange(name, 0, -1)
-}
-
-type OpenDirFS interface {
-	fs.FS
-	OpenDir(name string) (fs.ReadDirFile, error)
 }
 
 func (c *FSClient) OpenDir(name string) (fs.ReadDirFile, error) {
@@ -157,6 +154,16 @@ func (c *FSClient) Create(name string) (io.WriteCloser, error) {
 		return nil, err
 	}
 	return &clientFile{c: c, name: name}, nil
+}
+
+func (c *FSClient) Rename(name string, newName string) error {
+	_, err := c.request(&FileOperationRequest{Op: "rename", Path: name, Path2: newName})
+	return err
+}
+
+func (c *FSClient) Mkdir(name string, mode fs.FileMode) error {
+	_, err := c.request(&FileOperationRequest{Op: "mkdir", Path: name})
+	return err
 }
 
 func (c *FSClient) Remove(name string) error {
@@ -207,7 +214,7 @@ func (f *clientFile) Read(b []byte) (int, error) {
 		sz = f.c.MaxReadSize
 	}
 	res, err := f.c.request(&FileOperationRequest{Op: "read", Path: f.name, Pos: f.pos, Len: sz})
-	l := copy(b, res.binData)
+	l := copy(b, res.Buf)
 	f.pos += int64(l)
 	if err == nil && l < sz {
 		err = io.EOF

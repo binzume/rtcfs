@@ -30,6 +30,11 @@ func TestFSClient_Dir(t *testing.T) {
 		t.Fatal("ReadDir() error: ", err)
 	}
 
+	files, err = client.ReadDir("../")
+	if !errors.Is(err, fs.ErrInvalid) {
+		t.Fatal("ReadDir() shoudl be failed: ", err)
+	}
+
 	f, err := client.Open("/")
 	if err != nil || f == nil {
 		t.Fatal("Open() dir error: ", err)
@@ -108,7 +113,7 @@ func TestFSClient_File(t *testing.T) {
 }
 
 func TestFSClient_Write(t *testing.T) {
-	fsys := NewWritableDirFS(dir)
+	fsys := WrapFS(NewWritableDirFS(dir))
 	client := newFakeClient(fsys)
 	defer client.Abort()
 
@@ -144,8 +149,14 @@ func TestFSClient_Write(t *testing.T) {
 		t.Fatal("Size error ", stat.Size())
 	}
 
+	// Rename
+	err = client.Rename(fname, fname+".renamed")
+	if err != nil {
+		t.Fatal("Failed to rename", err)
+	}
+
 	// Remove
-	err = client.Remove(fname)
+	err = client.Remove(fname + ".renamed")
 	if err != nil {
 		t.Fatal("Failed to remove", err)
 	}
@@ -155,10 +166,23 @@ func TestFSClient_Write(t *testing.T) {
 		t.Fatal("Stat() should be ErrNotExist: ", err)
 	}
 
+	err = client.Mkdir("newdir", fs.ModePerm)
+	if err != nil {
+		t.Fatal("Failed to mkdir", err)
+	}
+
+	err = client.Remove("newdir")
+	if err != nil {
+		t.Fatal("Failed to removedir", err)
+	}
+
+	_, err = client.Create("../test")
+	if !errors.Is(err, fs.ErrInvalid) {
+		t.Fatal("Create() shoudl be failed: ", err)
+	}
+
 	// Readonly
-	fsys.Capability().Create = false
-	fsys.Capability().Remove = false
-	fsys.Capability().Write = false
+	fsys.ReadOnly()
 
 	_, err = client.Create(fname)
 	if !errors.Is(err, fs.ErrPermission) {

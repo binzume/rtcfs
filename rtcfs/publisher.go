@@ -52,8 +52,9 @@ func Publish(ctx context.Context, options *ConnectOptions, fsys fs.FS) error {
 			if auth.Type == "auth" {
 				authorized = authorized || auth.Token == authToken
 				j, _ := json.Marshal(map[string]interface{}{
-					"type":   "authResult",
-					"result": authorized,
+					"type":     "authResult",
+					"result":   authorized,
+					"services": map[string]interface{}{"file": fileHander.FSCaps()},
 				})
 				d.SendText(string(j))
 			}

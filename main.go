@@ -63,11 +63,9 @@ func publishFiles(ctx context.Context, config *Config, options *rtcfs.ConnectOpt
 		}
 	}
 
-	fsys := socfs.NewWritableDirFS(config.LocalPath)
+	fsys := socfs.WrapFS(socfs.NewWritableDirFS(config.LocalPath))
 	if !config.Writable {
-		fsys.Capability().Create = false
-		fsys.Capability().Remove = false
-		fsys.Capability().Write = false
+		fsys.ReadOnly()
 	}
 	log.Println("connecting... ", options.RoomID)
 	return rtcfs.Publish(ctx, options, fsys)
@@ -113,7 +111,7 @@ func main() {
 		if err != nil {
 			log.Println(err)
 		}
-	case "pull", "push", "ls", "cat", "rm":
+	case "pull", "push", "ls", "cat", "rm", "mkdir":
 		err := rtcfs.ShellExec(context.Background(), options, flag.Arg(0), flag.Arg(1))
 		if err != nil {
 			log.Println(err)

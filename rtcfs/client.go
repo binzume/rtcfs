@@ -36,6 +36,7 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 	}
 
 	var redirect string
+	var services map[string]interface{}
 
 	dataChannels := []DataChannelHandler{&DataChannelCallback{
 		Name: "fileServer",
@@ -66,13 +67,15 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 		},
 		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
 			var event struct {
-				Type   string `json:"type"`
-				Result bool   `json:"result"`
-				RoomID string `json:"roomId"`
+				Type     string                 `json:"type"`
+				Result   bool                   `json:"result"`
+				RoomID   string                 `json:"roomId"`
+				Services map[string]interface{} `json:"services"`
 			}
 			_ = json.Unmarshal(msg.Data, &event)
 			if event.Type == "authResult" {
 				authorized = event.Result
+				services = event.Services
 				wg.Done()
 			} else if event.Type == "redirect" {
 				redirect = event.RoomID
@@ -96,6 +99,12 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 	}
 
 	log.Println("connected! ", authorized)
+
+	if services != nil && services["file"] == nil {
+		rtcConn.Close()
+		return nil, nil, errors.New("no file service")
+	}
+
 	if !authorized {
 		rtcConn.Close()
 		return nil, nil, errors.New("auth error")

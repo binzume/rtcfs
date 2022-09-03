@@ -127,6 +127,8 @@ func shellExecCmd(ctx context.Context, client *socfs.FSClient, cwd, cmd, arg str
 		return shellPushFile(ctx, client, cwd, arg)
 	case "rm":
 		return client.Remove(path.Join(cwd, arg))
+	case "mkdir":
+		return client.Mkdir(path.Join(cwd, arg), fs.ModePerm)
 	case "?", "help":
 		fmt.Println("Commands: exit, pwd, cd PATH, ls PATH, pull FILE, push FILE, cat FILE, rm FILE")
 		return nil

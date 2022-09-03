@@ -18,19 +18,20 @@ import (
 )
 
 type FileOperationRequest struct {
-	Op   string `json:"op"`
-	RID  any    `json:"rid,omitempty"`
-	Path string `json:"path,omitempty"`
-	Pos  int64  `json:"p,omitempty"`
-	Len  int    `json:"l,omitempty"`
-	Buf  []byte `json:"b,omitempty"`
+	Op    string `json:"op"`
+	RID   any    `json:"rid,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Path2 string `json:"path2,omitempty"`
+	Pos   int64  `json:"p,omitempty"`
+	Len   int    `json:"l,omitempty"`
+	Buf   []byte `json:"b,omitempty"`
 }
 
 type FileOperationResult struct {
-	RID     any             `json:"rid,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	binData []byte
+	RID   any             `json:"rid,omitempty"`
+	Data  json.RawMessage `json:"data,omitempty"`
+	Error string          `json:"error,omitempty"`
+	Buf   []byte          `json:"b,omitempty"`
 }
 
 type FileEntry struct {
@@ -94,7 +95,7 @@ func (r *FileOperationRequest) ToBytes() []byte {
 }
 
 func (r *FileOperationResult) IsJSON() bool {
-	return r.binData == nil
+	return r.Buf == nil
 }
 
 func (r *FileOperationResult) ToBytes() []byte {
@@ -102,7 +103,7 @@ func (r *FileOperationResult) ToBytes() []byte {
 		var b []byte
 		b = binary.LittleEndian.AppendUint32(b, uint32(BinaryMessageResponseType))
 		b = binary.LittleEndian.AppendUint32(b, uint32(r.RID.(float64))) // TODO
-		b = append(b, r.binData...)
+		b = append(b, r.Buf...)
 		return b
 	}
 	b, err := json.Marshal(r)
@@ -113,12 +114,16 @@ func (r *FileOperationResult) ToBytes() []byte {
 }
 
 type FSServer struct {
-	fsys FS
+	fsys *WrappedFS
 	sem  *semaphore.Weighted
 }
 
 func NewFSServer(fsys fs.FS, parallels int) *FSServer {
 	return &FSServer{fsys: WrapFS(fsys), sem: semaphore.NewWeighted(int64(parallels))}
+}
+
+func (s *FSServer) FSCaps() *FSCapability {
+	return s.fsys.Capability()
 }
 
 // well known types
@@ -193,6 +198,8 @@ func errorToStr(err error) string {
 		return "closed"
 	} else if errors.Is(err, fs.ErrPermission) {
 		return "permission error"
+	} else if errors.Is(err, fs.ErrInvalid) {
+		return "invalid argument"
 	}
 	return fmt.Sprint(err)
 }
@@ -218,7 +225,7 @@ func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, 
 			writer(&FileOperationResult{RID: op.RID, Error: errorToStr(err)})
 		} else {
 			if bindata, ok := ret.([]byte); ok {
-				err = writer(&FileOperationResult{RID: op.RID, binData: bindata})
+				err = writer(&FileOperationResult{RID: op.RID, Buf: bindata})
 			} else {
 				jsonData, _ := json.Marshal(ret)
 				err = writer(&FileOperationResult{RID: op.RID, Data: jsonData})
@@ -314,16 +321,11 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 			return nil, nil
 		}
 	case "truncate":
-		f, err := h.fsys.OpenWriter(fixPath(op.Path), os.O_CREATE|os.O_WRONLY)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		if f, ok := f.(interface{ Truncate(int64) error }); ok {
-			return nil, f.Truncate(op.Pos)
-		} else {
-			return nil, errors.New("unsupported operation")
-		}
+		return nil, h.fsys.Truncate(fixPath(op.Path), op.Pos)
+	case "mkdir":
+		return nil, h.fsys.Mkdir(fixPath(op.Path), fs.ModePerm)
+	case "rename":
+		return nil, h.fsys.Rename(fixPath(op.Path), fixPath(op.Path2))
 	case "remove":
 		err := h.fsys.Remove(fixPath(op.Path))
 		return err == nil, err
