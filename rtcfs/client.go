@@ -2,6 +2,9 @@ package rtcfs
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
@@ -58,9 +61,15 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 		Name: "controlEvent",
 		OnOpenFunc: func(d *webrtc.DataChannel) {
 			if options.AuthToken != "" {
+				algo, fingerprint, _ := rtcConn.LocalCertificateFingerprint()
+				h := hmac.New(sha256.New, []byte(options.AuthToken))
+				h.Write([]byte(algo + " " + fingerprint))
 				j, _ := json.Marshal(map[string]interface{}{
-					"type":  "auth",
-					"token": options.AuthToken,
+					"type": "auth",
+					// "token":       options.AuthToken, // TODO: Remove this
+					"hash":        algo,
+					"fingerprint": fingerprint,
+					"hmac":        hex.EncodeToString(h.Sum(nil)),
 				})
 				d.SendText(string(j))
 			}

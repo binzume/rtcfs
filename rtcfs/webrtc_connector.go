@@ -2,9 +2,13 @@ package rtcfs
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
 	"log"
+	"strings"
 
 	"github.com/binzume/webrtcfs/ayame"
+	"github.com/pion/dtls/v2/pkg/crypto/fingerprint"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -156,6 +160,38 @@ func (c *RTCConn) Start(dataChannles []DataChannelHandler) {
 			}
 		}
 	}()
+}
+
+func (c *RTCConn) LocalCertificateFingerprint() (string, string, error) {
+	localPram, err := c.PC.SCTP().Transport().GetLocalParameters()
+	if err != nil {
+		return "", "", err
+	}
+	if len(localPram.Fingerprints) == 0 {
+		return "", "", errors.New("no fingerprints")
+	}
+	return localPram.Fingerprints[0].Algorithm, localPram.Fingerprints[0].Value, nil
+}
+
+func (c *RTCConn) ValidateRemoteFingerprint(algoname, hash string) bool {
+	fingerprint, err := c.RemoteCertificateFingerprint(algoname)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(fingerprint, hash)
+}
+
+func (c *RTCConn) RemoteCertificateFingerprint(algoname string) (string, error) {
+	algo, err := fingerprint.HashFromString(algoname)
+	if err != nil {
+		return "", err
+	}
+
+	remoteCert, err := x509.ParseCertificate(c.PC.SCTP().Transport().GetRemoteCertificate())
+	if err != nil {
+		return "", err
+	}
+	return fingerprint.Fingerprint(remoteCert, algo)
 }
 
 func (c *RTCConn) Close() error {

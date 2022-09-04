@@ -204,10 +204,24 @@ func errorToStr(err error) string {
 	return fmt.Sprint(err)
 }
 
+func (h *FSServer) ErrorReply(ctx context.Context, data []byte, isjson bool, writer func(*FileOperationResult) error, msg string) error {
+	var rid any
+	if !isjson {
+		rid = binary.LittleEndian.Uint32(data[4:8])
+	} else {
+		var op FileOperationRequest
+		err := json.Unmarshal(data, &op)
+		if err != nil {
+			return err
+		}
+		rid = op.RID
+	}
+	return writer(&FileOperationResult{RID: rid, Error: msg})
+}
+
 func (h *FSServer) HandleMessage(ctx context.Context, data []byte, isjson bool, writer func(*FileOperationResult) error) error {
 	if !isjson {
-		rid := binary.LittleEndian.Uint32(data[4:8])
-		writer(&FileOperationResult{RID: rid, Error: fmt.Sprint("TODO: support binary message")})
+		h.ErrorReply(ctx, data, isjson, writer, "TODO: support binary message")
 		return errors.New("not implemented")
 	}
 
