@@ -1,10 +1,10 @@
 package rtcfs
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"log"
@@ -57,19 +57,19 @@ func Publish(ctx context.Context, options *ConnectOptions, fsys fs.FS) error {
 				Type       string `json:"type"`
 				Token      string `json:"token"` // TODO: Remove this
 				Fingeprint string `json:"fingerprint"`
-				Hmac       string `json:"hmac"`
+				Hmac       []byte `json:"hmac"`
 				Hash       string `json:"hash"`
 			}
 			_ = json.Unmarshal(msg.Data, &auth)
 			if auth.Type == "auth" {
-				if auth.Hmac != "" {
+				if len(auth.Hmac) > 0 {
 					if !rtcConn.ValidateRemoteFingerprint(auth.Hash, auth.Fingeprint) {
 						// Broken client or MITM
 						log.Println("fingerprint error: ", auth.Hash, auth.Fingeprint)
 					} else {
 						h := hmac.New(sha256.New, []byte(options.AuthToken))
 						h.Write([]byte(auth.Hash + " " + auth.Fingeprint))
-						authorized = authorized || hex.EncodeToString(h.Sum(nil)) == auth.Hmac
+						authorized = authorized || bytes.Compare(h.Sum(nil), auth.Hmac) == 0
 					}
 				} else {
 					authorized = authorized || auth.Token == authToken

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
@@ -69,7 +68,7 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 					// "token":       options.AuthToken, // TODO: Remove this
 					"hash":        algo,
 					"fingerprint": fingerprint,
-					"hmac":        hex.EncodeToString(h.Sum(nil)),
+					"hmac":        h.Sum(nil), // base64 string in json
 				})
 				d.SendText(string(j))
 			}
