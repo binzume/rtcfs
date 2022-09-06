@@ -60,13 +60,12 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 		Name: "controlEvent",
 		OnOpenFunc: func(d *webrtc.DataChannel) {
 			if options.AuthToken != "" {
-				algo, fingerprint, _ := rtcConn.LocalCertificateFingerprint()
+				fingerprint, _ := rtcConn.LocalCertificateFingerprint()
 				h := hmac.New(sha256.New, []byte(options.AuthToken))
-				h.Write([]byte(algo + " " + fingerprint))
+				h.Write([]byte(fingerprint))
 				j, _ := json.Marshal(map[string]interface{}{
 					"type": "auth",
 					// "token":       options.AuthToken, // TODO: Remove this
-					"hash":        algo,
 					"fingerprint": fingerprint,
 					"hmac":        h.Sum(nil), // base64 string in json
 				})

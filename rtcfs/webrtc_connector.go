@@ -162,26 +162,30 @@ func (c *RTCConn) Start(dataChannles []DataChannelHandler) {
 	}()
 }
 
-func (c *RTCConn) LocalCertificateFingerprint() (string, string, error) {
+func (c *RTCConn) LocalCertificateFingerprint() (string, error) {
 	localPram, err := c.PC.SCTP().Transport().GetLocalParameters()
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	if len(localPram.Fingerprints) == 0 {
-		return "", "", errors.New("no fingerprints")
+		return "", errors.New("no fingerprints")
 	}
-	return localPram.Fingerprints[0].Algorithm, localPram.Fingerprints[0].Value, nil
+	return localPram.Fingerprints[0].Algorithm + " " + localPram.Fingerprints[0].Value, nil
 }
 
-func (c *RTCConn) ValidateRemoteFingerprint(algoname, hash string) bool {
-	fingerprint, err := c.RemoteCertificateFingerprint(algoname)
+func (c *RTCConn) ValidateRemoteFingerprint(fingerprint string) bool {
+	f := strings.SplitN(fingerprint, " ", 2)
+	if len(f) != 2 {
+		return false
+	}
+	remoteFingerprint, err := c.RemoteCertificateHash(f[0])
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(fingerprint, hash)
+	return strings.EqualFold(remoteFingerprint, f[1])
 }
 
-func (c *RTCConn) RemoteCertificateFingerprint(algoname string) (string, error) {
+func (c *RTCConn) RemoteCertificateHash(algoname string) (string, error) {
 	algo, err := fingerprint.HashFromString(algoname)
 	if err != nil {
 		return "", err

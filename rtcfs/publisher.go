@@ -58,22 +58,22 @@ func Publish(ctx context.Context, options *ConnectOptions, fsys fs.FS) error {
 				Token      string `json:"token"` // TODO: Remove this
 				Fingeprint string `json:"fingerprint"`
 				Hmac       []byte `json:"hmac"`
-				Hash       string `json:"hash"`
 			}
 			_ = json.Unmarshal(msg.Data, &auth)
 			if auth.Type == "auth" {
 				if len(auth.Hmac) > 0 {
-					if !rtcConn.ValidateRemoteFingerprint(auth.Hash, auth.Fingeprint) {
+					if !rtcConn.ValidateRemoteFingerprint(auth.Fingeprint) {
 						// Broken client or MITM
-						log.Println("fingerprint error: ", auth.Hash, auth.Fingeprint)
+						log.Println("fingerprint error: ", auth.Fingeprint)
 					} else {
 						h := hmac.New(sha256.New, []byte(options.AuthToken))
-						h.Write([]byte(auth.Hash + " " + auth.Fingeprint))
+						h.Write([]byte(auth.Fingeprint))
 						authorized = authorized || bytes.Compare(h.Sum(nil), auth.Hmac) == 0
 					}
 				} else {
 					authorized = authorized || auth.Token == authToken
 				}
+				log.Println("auth result:", authorized, string(msg.Data))
 				j, _ := json.Marshal(map[string]interface{}{
 					"type":     "authResult",
 					"result":   authorized,
