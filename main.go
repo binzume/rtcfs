@@ -92,8 +92,11 @@ func main() {
 	options := &rtcfs.ConnectOptions{
 		SignalingURL: config.SignalingUrl,
 		SignalingKey: config.SignalingKey,
-		RoomID:       config.RoomIdPrefix + config.RoomName + ".1",
+		RoomID:       config.RoomIdPrefix + config.RoomName,
 		AuthToken:    config.AuthToken,
+	}
+	if flag.Arg(0) != "pairing" {
+		options.RoomID += ".1"
 	}
 
 	switch flag.Arg(0) {
