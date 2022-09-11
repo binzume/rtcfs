@@ -46,7 +46,7 @@ func Pairing(ctx context.Context, options *PairingOptions) error {
 				"type":         "hello",
 				"roomId":       options.RoomID,
 				"signalingKey": options.SignalingKey,
-				"token":        options.AuthToken,
+				"token":        options.Password,
 				"userAgent":    "rtcfs",
 				"version":      1,
 			})

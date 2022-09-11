@@ -24,7 +24,7 @@ func GetClinet(ctx context.Context, options *ConnectOptions, clientOpt *ClientOp
 func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID string, redirectCount int) (*RTCConn, *socfs.FSClient, error) {
 	log.Println("waiting for connect: ", roomID)
 	var client *socfs.FSClient
-	authorized := options.AuthToken == ""
+	authorized := options.Password == ""
 
 	rtcConn, err := NewRTCConn(options.SignalingURL, roomID, options.SignalingKey)
 	if err != nil {
@@ -33,7 +33,7 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	if options.AuthToken != "" {
+	if options.Password != "" {
 		wg.Add(1)
 	}
 
@@ -59,9 +59,9 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 	}, &DataChannelCallback{
 		Name: "controlEvent",
 		OnOpenFunc: func(d *webrtc.DataChannel) {
-			if options.AuthToken != "" {
+			if options.Password != "" {
 				fingerprint, _ := rtcConn.LocalCertificateFingerprint()
-				h := hmac.New(sha256.New, []byte(options.AuthToken))
+				h := hmac.New(sha256.New, []byte(options.Password))
 				h.Write([]byte(fingerprint))
 				j, _ := json.Marshal(map[string]interface{}{
 					"type": "auth",

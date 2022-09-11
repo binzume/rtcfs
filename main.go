@@ -22,7 +22,7 @@ type Config struct {
 	PairingTimeoutSec   int
 
 	RoomName  string
-	AuthToken string
+	Password  string
 	LocalPath string
 
 	Writable bool
@@ -74,7 +74,7 @@ func publishFiles(ctx context.Context, config *Config, options *rtcfs.ConnectOpt
 func main() {
 	confPath := flag.String("conf", "config.toml", "conf path")
 	roomName := flag.String("room", "", "Ayame room name")
-	authToken := flag.String("token", "", "auth token")
+	password := flag.String("passwd", "", "Connect password")
 	writable := flag.Bool("writable", false, "writable fs")
 	flag.Parse()
 
@@ -82,8 +82,8 @@ func main() {
 	if *roomName != "" {
 		config.RoomName = *roomName
 	}
-	if *authToken != "" {
-		config.AuthToken = *authToken
+	if *password != "" {
+		config.Password = *password
 	}
 	if *writable {
 		config.Writable = *writable
@@ -93,7 +93,7 @@ func main() {
 		SignalingURL: config.SignalingUrl,
 		SignalingKey: config.SignalingKey,
 		RoomID:       config.RoomIdPrefix + config.RoomName,
-		AuthToken:    config.AuthToken,
+		Password:     config.Password,
 	}
 	if flag.Arg(0) != "pairing" {
 		options.RoomID += ".1"

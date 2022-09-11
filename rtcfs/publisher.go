@@ -14,7 +14,7 @@ import (
 )
 
 func Publish(ctx context.Context, options *ConnectOptions, fsys fs.FS) error {
-	authToken := options.AuthToken
+	authToken := options.Password
 	authorized := authToken == ""
 
 	rtcConn, err := NewRTCConn(options.SignalingURL, options.RoomID, options.SignalingKey)
@@ -66,7 +66,7 @@ func Publish(ctx context.Context, options *ConnectOptions, fsys fs.FS) error {
 						// Broken client or MITM
 						log.Println("fingerprint error: ", auth.Fingeprint)
 					} else {
-						h := hmac.New(sha256.New, []byte(options.AuthToken))
+						h := hmac.New(sha256.New, []byte(options.Password))
 						h.Write([]byte(auth.Fingeprint))
 						authorized = authorized || bytes.Compare(h.Sum(nil), auth.Hmac) == 0
 					}

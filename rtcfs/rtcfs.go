@@ -5,5 +5,5 @@ type ConnectOptions struct {
 	SignalingKey string
 	RoomID       string
 
-	AuthToken string
+	Password string
 }

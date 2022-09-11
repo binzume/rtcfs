@@ -64,7 +64,7 @@ func main() {
 		SignalingURL: config.SignalingUrl,
 		SignalingKey: config.SignalingKey,
 		RoomID:       config.RoomIdPrefix + config.RoomName + ".1",
-		AuthToken:    config.AuthToken,
+		Password:     config.AuthToken,
 	}
 
 	rtcConn, client, err := rtcfs.GetClinet(context.Background(), options, &rtcfs.ClientOptions{MaxRedirect: 3})
