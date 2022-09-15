@@ -16,17 +16,16 @@ import (
 )
 
 func randomStr(l int) string {
-	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const letters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
 	b := make([]byte, l)
-	if _, err := rand.Read(b); err != nil {
+	r := make([]byte, l)
+	if _, err := rand.Read(r); err != nil {
 		panic(err)
 	}
-
-	var result string
-	for _, v := range b {
-		result += string(letters[int(v)%len(letters)])
+	for i := range b {
+		b[i] = letters[r[i]%byte(len(letters))]
 	}
-	return result
+	return string(b)
 }
 
 func StartRedirector(ctx context.Context, options *ConnectOptions, redirect func(roomId string)) error {
@@ -69,8 +68,8 @@ func Publish(ctx context.Context, options *ConnectOptions, fsys fs.FS) error {
 }
 
 func PublishRoomID(ctx context.Context, options *ConnectOptions, roomID string, fsys fs.FS) error {
-	authToken := options.Password
-	authorized := authToken == ""
+	password := options.Password
+	authorized := password == ""
 
 	rtcConn, err := NewRTCConn(options.SignalingURL, roomID, options.SignalingKey)
 	if err != nil {
@@ -126,7 +125,7 @@ func PublishRoomID(ctx context.Context, options *ConnectOptions, roomID string, 
 						authorized = authorized || bytes.Compare(h.Sum(nil), auth.Hmac) == 0
 					}
 				} else {
-					authorized = authorized || auth.Token == authToken
+					authorized = authorized || auth.Token == password
 				}
 				log.Println("auth result:", authorized, string(msg.Data))
 				j, _ := json.Marshal(map[string]interface{}{
