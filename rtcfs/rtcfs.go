@@ -7,3 +7,7 @@ type ConnectOptions struct {
 
 	Password string
 }
+
+func (o *ConnectOptions) DefaultRoomID() string {
+	return o.RoomID + ".1"
+}

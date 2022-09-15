@@ -4,20 +4,75 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"io/fs"
 	"log"
+	"time"
 
 	"github.com/binzume/webrtcfs/socfs"
 	"github.com/pion/webrtc/v3"
 )
 
+func randomStr(l int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, l)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+
+	var result string
+	for _, v := range b {
+		result += string(letters[int(v)%len(letters)])
+	}
+	return result
+}
+
+func StartRedirector(ctx context.Context, options *ConnectOptions, redirect func(roomId string)) error {
+	for {
+		rtcConn, err := NewRTCConn(options.SignalingURL, options.DefaultRoomID(), options.SignalingKey)
+		if err != nil {
+			return err
+		}
+
+		dataChannels := []DataChannelHandler{&DataChannelCallback{
+			Name: "controlEvent",
+			OnOpenFunc: func(d *webrtc.DataChannel) {
+				roomID := options.RoomID + "." + randomStr(10)
+				go redirect(roomID)
+				j, _ := json.Marshal(map[string]interface{}{
+					"type":   "redirect",
+					"roomId": roomID,
+				})
+				d.SendText(string(j))
+				go func() {
+					time.Sleep(time.Second)
+					rtcConn.Close()
+				}()
+			},
+		}}
+
+		rtcConn.Start(dataChannels)
+		rtcConn.Wait(ctx)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
 func Publish(ctx context.Context, options *ConnectOptions, fsys fs.FS) error {
+	return PublishRoomID(ctx, options, options.DefaultRoomID(), fsys)
+}
+
+func PublishRoomID(ctx context.Context, options *ConnectOptions, roomID string, fsys fs.FS) error {
 	authToken := options.Password
 	authorized := authToken == ""
 
-	rtcConn, err := NewRTCConn(options.SignalingURL, options.RoomID, options.SignalingKey)
+	rtcConn, err := NewRTCConn(options.SignalingURL, roomID, options.SignalingKey)
 	if err != nil {
 		return err
 	}

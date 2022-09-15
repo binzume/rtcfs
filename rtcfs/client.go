@@ -18,7 +18,7 @@ type ClientOptions struct {
 }
 
 func GetClinet(ctx context.Context, options *ConnectOptions, clientOpt *ClientOptions) (*RTCConn, *socfs.FSClient, error) {
-	return getClinetInternal(ctx, options, options.RoomID, clientOpt.MaxRedirect)
+	return getClinetInternal(ctx, options, options.DefaultRoomID(), clientOpt.MaxRedirect)
 }
 
 func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID string, redirectCount int) (*RTCConn, *socfs.FSClient, error) {
@@ -32,10 +32,7 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	if options.Password != "" {
-		wg.Add(1)
-	}
+	wg.Add(2)
 
 	var redirect string
 	var services map[string]interface{}
@@ -59,18 +56,16 @@ func getClinetInternal(ctx context.Context, options *ConnectOptions, roomID stri
 	}, &DataChannelCallback{
 		Name: "controlEvent",
 		OnOpenFunc: func(d *webrtc.DataChannel) {
-			if options.Password != "" {
-				fingerprint, _ := rtcConn.LocalCertificateFingerprint()
-				h := hmac.New(sha256.New, []byte(options.Password))
-				h.Write([]byte(fingerprint))
-				j, _ := json.Marshal(map[string]interface{}{
-					"type": "auth",
-					// "token":       options.AuthToken, // TODO: Remove this
-					"fingerprint": fingerprint,
-					"hmac":        h.Sum(nil), // base64 string in json
-				})
-				d.SendText(string(j))
-			}
+			fingerprint, _ := rtcConn.LocalCertificateFingerprint()
+			h := hmac.New(sha256.New, []byte(options.Password))
+			h.Write([]byte(fingerprint))
+			j, _ := json.Marshal(map[string]interface{}{
+				"type": "auth",
+				// "token":       options.AuthToken, // TODO: Remove this
+				"fingerprint": fingerprint,
+				"hmac":        h.Sum(nil), // base64 string in json
+			})
+			d.SendText(string(j))
 		},
 		OnMessageFunc: func(d *webrtc.DataChannel, msg webrtc.DataChannelMessage) {
 			var event struct {

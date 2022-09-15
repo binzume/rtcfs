@@ -68,7 +68,11 @@ func publishFiles(ctx context.Context, config *Config, options *rtcfs.ConnectOpt
 		fsys.ReadOnly()
 	}
 	log.Println("connecting... ", options.RoomID)
-	return rtcfs.Publish(ctx, options, fsys)
+	return rtcfs.StartRedirector(ctx, options, func(roomID string) {
+		// TODO: connect timeout
+		log.Println("temporary room:", roomID)
+		rtcfs.PublishRoomID(ctx, options, roomID, fsys)
+	})
 }
 
 func main() {
@@ -94,9 +98,6 @@ func main() {
 		SignalingKey: config.SignalingKey,
 		RoomID:       config.RoomIdPrefix + config.RoomName,
 		Password:     config.Password,
-	}
-	if flag.Arg(0) != "pairing" {
-		options.RoomID += ".1"
 	}
 
 	switch flag.Arg(0) {
