@@ -16,7 +16,7 @@ import (
 )
 
 func randomStr(l int) string {
-	const letters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
+	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 	b := make([]byte, l)
 	r := make([]byte, l)
 	if _, err := rand.Read(r); err != nil {
