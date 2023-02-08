@@ -44,7 +44,7 @@ func loadConfig(confPath string) *Config {
 func main() {
 	confPath := flag.String("conf", "config.toml", "conf path")
 	roomName := flag.String("room", "", "Ayame room name")
-	authToken := flag.String("token", "", "auth token")
+	authToken := flag.String("passwd", "", "Connect password")
 	flag.Parse()
 
 	config := loadConfig(*confPath)
@@ -63,7 +63,7 @@ func main() {
 	options := &rtcfs.ConnectOptions{
 		SignalingURL: config.SignalingUrl,
 		SignalingKey: config.SignalingKey,
-		RoomID:       config.RoomIdPrefix + config.RoomName + ".1",
+		RoomID:       config.RoomIdPrefix + config.RoomName,
 		Password:     config.AuthToken,
 	}
 
