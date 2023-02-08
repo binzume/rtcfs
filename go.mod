@@ -3,13 +3,14 @@ module github.com/binzume/webrtcfs
 go 1.19
 
 require (
-	github.com/BurntSushi/toml v1.2.0
+	github.com/BurntSushi/toml v1.2.1
 	github.com/binzume/fsmount v0.1.4
 	github.com/gorilla/websocket v1.5.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
+	github.com/pion/dtls/v2 v2.1.5
 	github.com/pion/webrtc/v3 v3.1.43
-	golang.org/x/image v0.0.0-20220722155232-062f8c9fd539
-	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
+	golang.org/x/image v0.3.0
+	golang.org/x/sync v0.1.0
 )
 
 require (
@@ -17,7 +18,6 @@ require (
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/hanwen/go-fuse/v2 v2.1.0 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
-	github.com/pion/dtls/v2 v2.1.5 // indirect
 	github.com/pion/ice/v2 v2.2.6 // indirect
 	github.com/pion/interceptor v0.1.11 // indirect
 	github.com/pion/logging v0.2.2 // indirect
@@ -33,6 +33,6 @@ require (
 	github.com/pion/turn/v2 v2.0.8 // indirect
 	github.com/pion/udp v0.1.1 // indirect
 	golang.org/x/crypto v0.0.0-20220516162934-403b01795ae8 // indirect
-	golang.org/x/net v0.0.0-20220630215102-69896b714898 // indirect
+	golang.org/x/net v0.0.0-20220722155237-a158d28d115b // indirect
 	golang.org/x/sys v0.0.0-20220818161305-2296e01440c6 // indirect
 )
