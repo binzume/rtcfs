@@ -7,9 +7,55 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"sync"
 	"time"
 )
+
+type statCache struct {
+	*FSClient
+	lock  sync.Mutex
+	stats map[string]*statCacheE
+}
+
+type statCacheE struct {
+	stat fs.FileInfo
+	time time.Time
+}
+
+var statCacheExpireTime = time.Second * 5
+
+func (c *statCache) set(path string, stat fs.FileInfo) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.stats[path] = &statCacheE{stat: stat, time: time.Now()}
+}
+func (c *statCache) get(path string) (fs.FileInfo, bool) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if s, ok := c.stats[path]; ok {
+		if s.time.Add(statCacheExpireTime).After(time.Now()) {
+			return s.stat, true
+		}
+		delete(c.stats, path)
+	}
+	return nil, false
+}
+func (c *statCache) delete(path string) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	delete(c.stats, path)
+}
+func (c *statCache) scan() {
+	now := time.Now()
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	for path, s := range c.stats {
+		if now.After(s.time.Add(statCacheExpireTime)) {
+			delete(c.stats, path)
+		}
+	}
+}
 
 // FSClient implements fs.FS
 type FSClient struct {
@@ -19,10 +65,15 @@ type FSClient struct {
 	locker      sync.Mutex
 	MaxReadSize int
 	Timeout     time.Duration
+	statCache   statCache
 }
 
 func NewFSClient(sendFunc func(req *FileOperationRequest) error) *FSClient {
-	return &FSClient{sendFunc: sendFunc, wait: map[uint32]chan *FileOperationResult{}, MaxReadSize: 65000, Timeout: 30 * time.Second}
+	return &FSClient{
+		sendFunc: sendFunc,
+		wait:     map[uint32]chan *FileOperationResult{}, MaxReadSize: 65000, Timeout: 30 * time.Second,
+		statCache: statCache{stats: map[string]*statCacheE{}},
+	}
 }
 
 func (c *FSClient) request(req *FileOperationRequest) (*FileOperationResult, error) {
@@ -99,12 +150,28 @@ func (c *FSClient) Open(name string) (fs.File, error) {
 
 // fs.StatFS
 func (c *FSClient) Stat(name string) (fs.FileInfo, error) {
+	if s, ok := c.statCache.get(name); ok {
+		if s == nil {
+			return nil, &os.PathError{
+				Op:   "stat",
+				Path: name,
+				Err:  fs.ErrNotExist,
+			}
+		}
+		stat := s
+		return stat, nil
+	}
+
 	res, err := c.request(&FileOperationRequest{Op: "stat", Path: name})
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			c.statCache.set(name, nil)
+		}
 		return nil, err
 	}
 	var result FileEntry
 	json.Unmarshal(res.Data, &result)
+	c.statCache.set(name, &result)
 	return &result, nil
 }
 
@@ -139,6 +206,7 @@ func (c *FSClient) ReadDirRange(name string, pos, limit int) ([]fs.DirEntry, err
 		json.Unmarshal(res.Data, &result)
 		for _, f := range result {
 			entries = append(entries, &clientDirEnt{FileEntry: f})
+			c.statCache.set(path.Join(name, f.Name()), f)
 		}
 		if len(result) != n {
 			break // io.EOF
@@ -149,6 +217,7 @@ func (c *FSClient) ReadDirRange(name string, pos, limit int) ([]fs.DirEntry, err
 }
 
 func (c *FSClient) Create(name string) (io.WriteCloser, error) {
+	c.statCache.delete(name)
 	err := c.Truncate(name, 0)
 	if err != nil {
 		return nil, err
@@ -157,16 +226,20 @@ func (c *FSClient) Create(name string) (io.WriteCloser, error) {
 }
 
 func (c *FSClient) Rename(name string, newName string) error {
+	c.statCache.delete(name)
+	c.statCache.delete(newName)
 	_, err := c.request(&FileOperationRequest{Op: "rename", Path: name, Path2: newName})
 	return err
 }
 
 func (c *FSClient) Mkdir(name string, mode fs.FileMode) error {
+	c.statCache.delete(name)
 	_, err := c.request(&FileOperationRequest{Op: "mkdir", Path: name})
 	return err
 }
 
 func (c *FSClient) Remove(name string) error {
+	c.statCache.delete(name)
 	_, err := c.request(&FileOperationRequest{Op: "remove", Path: name})
 	return err
 }
