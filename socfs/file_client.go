@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -12,30 +13,29 @@ import (
 	"time"
 )
 
+var statCacheExpireTime = time.Second * 5
+
 type statCache struct {
-	*FSClient
 	lock  sync.Mutex
 	stats map[string]*statCacheE
 }
 
 type statCacheE struct {
-	stat fs.FileInfo
-	time time.Time
+	value fs.FileInfo
+	time  time.Time
 }
 
-var statCacheExpireTime = time.Second * 5
-
-func (c *statCache) set(path string, stat fs.FileInfo) {
+func (c *statCache) set(path string, value fs.FileInfo) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	c.stats[path] = &statCacheE{stat: stat, time: time.Now()}
+	c.stats[path] = &statCacheE{value: value, time: time.Now()}
 }
 func (c *statCache) get(path string) (fs.FileInfo, bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if s, ok := c.stats[path]; ok {
 		if s.time.Add(statCacheExpireTime).After(time.Now()) {
-			return s.stat, true
+			return s.value, true
 		}
 		delete(c.stats, path)
 	}
@@ -57,6 +57,51 @@ func (c *statCache) scan() {
 	}
 }
 
+var filesCacheExpireTime = time.Second * 5
+
+type filesCache struct {
+	lock   sync.Mutex
+	values map[string]*filesCacheE
+}
+
+type filesCacheE struct {
+	value []fs.DirEntry
+	limit int
+	time  time.Time
+}
+
+func (c *filesCache) set(path string, value []fs.DirEntry, limit int) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.values[path] = &filesCacheE{value: value, limit: limit, time: time.Now()}
+}
+func (c *filesCache) get(path string) ([]fs.DirEntry, int, bool) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if s, ok := c.values[path]; ok {
+		if s.time.Add(filesCacheExpireTime).After(time.Now()) {
+			return s.value, s.limit, true
+		}
+		delete(c.values, path)
+	}
+	return nil, 0, false
+}
+func (c *filesCache) delete(path string) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	delete(c.values, path)
+}
+func (c *filesCache) scan() {
+	now := time.Now()
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	for path, s := range c.values {
+		if now.After(s.time.Add(statCacheExpireTime)) {
+			delete(c.values, path)
+		}
+	}
+}
+
 // FSClient implements fs.FS
 type FSClient struct {
 	sendFunc    func(req *FileOperationRequest) error
@@ -66,13 +111,15 @@ type FSClient struct {
 	MaxReadSize int
 	Timeout     time.Duration
 	statCache   statCache
+	filesCache  filesCache
 }
 
 func NewFSClient(sendFunc func(req *FileOperationRequest) error) *FSClient {
 	return &FSClient{
 		sendFunc: sendFunc,
 		wait:     map[uint32]chan *FileOperationResult{}, MaxReadSize: 65000, Timeout: 30 * time.Second,
-		statCache: statCache{stats: map[string]*statCacheE{}},
+		statCache:  statCache{stats: map[string]*statCacheE{}},
+		filesCache: filesCache{values: map[string]*filesCacheE{}},
 	}
 }
 
@@ -190,6 +237,20 @@ func (c *FSClient) ReadDirRange(name string, pos, limit int) ([]fs.DirEntry, err
 		limit = 65536
 	}
 
+	key := name
+	if pos != 0 {
+		key += ";" + fmt.Sprint(pos)
+	}
+	if cached, l, ok := c.filesCache.get(key); ok && l >= limit {
+		for _, f := range cached {
+			if len(entries) >= limit {
+				break
+			}
+			entries = append(entries, f)
+		}
+		return entries, nil
+	}
+
 	for {
 		n := limit - len(entries)
 		if n <= 0 {
@@ -208,16 +269,21 @@ func (c *FSClient) ReadDirRange(name string, pos, limit int) ([]fs.DirEntry, err
 			entries = append(entries, &clientDirEnt{FileEntry: f})
 			c.statCache.set(path.Join(name, f.Name()), f)
 		}
+		pos += len(result)
 		if len(result) != n {
 			break // io.EOF
 		}
 	}
+
+	c.filesCache.set(key, entries, limit)
 
 	return entries, nil
 }
 
 func (c *FSClient) Create(name string) (io.WriteCloser, error) {
 	c.statCache.delete(name)
+	c.filesCache.delete(name)
+	c.filesCache.delete(path.Dir(name))
 	err := c.Truncate(name, 0)
 	if err != nil {
 		return nil, err
@@ -228,18 +294,24 @@ func (c *FSClient) Create(name string) (io.WriteCloser, error) {
 func (c *FSClient) Rename(name string, newName string) error {
 	c.statCache.delete(name)
 	c.statCache.delete(newName)
+	c.filesCache.delete(name)
+	c.filesCache.delete(path.Dir(name))
 	_, err := c.request(&FileOperationRequest{Op: "rename", Path: name, Path2: newName})
 	return err
 }
 
 func (c *FSClient) Mkdir(name string, mode fs.FileMode) error {
 	c.statCache.delete(name)
+	c.filesCache.delete(name)
+	c.filesCache.delete(path.Dir(name))
 	_, err := c.request(&FileOperationRequest{Op: "mkdir", Path: name})
 	return err
 }
 
 func (c *FSClient) Remove(name string) error {
 	c.statCache.delete(name)
+	c.filesCache.delete(name)
+	c.filesCache.delete(path.Dir(name))
 	_, err := c.request(&FileOperationRequest{Op: "remove", Path: name})
 	return err
 }
