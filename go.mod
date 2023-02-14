@@ -14,7 +14,7 @@ require (
 )
 
 require (
-	github.com/binzume/dkango v0.1.5 // indirect
+	github.com/binzume/dkango v0.1.6 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/hanwen/go-fuse/v2 v2.1.0 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
@@ -34,5 +34,5 @@ require (
 	github.com/pion/udp v0.1.1 // indirect
 	golang.org/x/crypto v0.0.0-20220516162934-403b01795ae8 // indirect
 	golang.org/x/net v0.0.0-20220722155237-a158d28d115b // indirect
-	golang.org/x/sys v0.0.0-20220818161305-2296e01440c6 // indirect
+	golang.org/x/sys v0.5.0 // indirect
 )
