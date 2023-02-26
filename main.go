@@ -5,11 +5,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/binzume/cfs/zipfs"
 	"github.com/binzume/webrtcfs/rtcfs"
 	"github.com/binzume/webrtcfs/socfs"
 )
@@ -21,11 +23,12 @@ type Config struct {
 	PairingRoomIdPrefix string
 	PairingTimeoutSec   int
 
-	RoomName  string
+	Name      string
 	Password  string
 	LocalPath string
 
 	Writable bool
+	Unzip    bool
 
 	ThumbnailCacheDir string
 	FFmpegPath        string
@@ -62,46 +65,64 @@ func publishFiles(ctx context.Context, config *Config, options *rtcfs.ConnectOpt
 			socfs.DefaultThumbnailer.Register(socfs.NewVideoThumbnailer(config.ThumbnailCacheDir, config.FFmpegPath))
 		}
 	}
+	var fsys fs.FS = socfs.NewWritableDirFS(config.LocalPath)
+	if config.Unzip {
+		fsys = zipfs.NewAutoUnzipFS(fsys)
+		socfs.ContentTypes[".zip"] = "application/zip;x-traversable"
+	}
 
-	fsys := socfs.WrapFS(socfs.NewWritableDirFS(config.LocalPath))
+	wfsys := socfs.WrapFS(fsys)
 	if !config.Writable {
-		fsys.ReadOnly()
+		wfsys.ReadOnly()
 	}
 	log.Println("connecting... ", options.RoomID)
 	return rtcfs.StartRedirector(ctx, options, func(roomID string) {
 		// TODO: connect timeout
 		log.Println("temporary room:", roomID)
-		rtcfs.PublishRoomID(ctx, options, roomID, fsys)
+		rtcfs.PublishRoomID(ctx, options, roomID, wfsys)
 	})
 }
 
 func main() {
 	confPath := flag.String("conf", "config.toml", "conf path")
-	roomName := flag.String("room", "", "Ayame room name")
+	name := flag.String("room", "", "Room name")
 	password := flag.String("passwd", "", "Connect password")
+	signalingUrl := flag.String("signalingUrl", "", "Ayame signaling url")
+	signalingKey := flag.String("signalingKey", "", "Ayame signaling key")
 	writable := flag.Bool("writable", false, "writable fs")
+	unzip := flag.Bool("unzip", false, "Allow ReadDir() for .zip file(experiment)")
 	flag.Parse()
 
 	config := loadConfig(*confPath)
-	if *roomName != "" {
-		config.RoomName = *roomName
+	if *name != "" {
+		config.Name = *name
 	}
 	if *password != "" {
 		config.Password = *password
 	}
+	if *signalingUrl != "" {
+		config.SignalingUrl = *signalingUrl
+	}
+	if *signalingKey != "" {
+		config.SignalingKey = *signalingKey
+	}
 	if *writable {
 		config.Writable = *writable
+	}
+	if *unzip {
+		config.Unzip = *unzip
 	}
 
 	options := &rtcfs.ConnectOptions{
 		SignalingURL: config.SignalingUrl,
 		SignalingKey: config.SignalingKey,
-		RoomID:       config.RoomIdPrefix + config.RoomName,
+		RoomID:       config.RoomIdPrefix + config.Name,
 		Password:     config.Password,
 	}
 
 	switch flag.Arg(0) {
 	case "pairing":
+		log.Println("Pairing... room:", options.RoomID)
 		err := rtcfs.Pairing(context.Background(), &rtcfs.PairingOptions{
 			ConnectOptions:      *options,
 			PairingRoomIDPrefix: config.PairingRoomIdPrefix,

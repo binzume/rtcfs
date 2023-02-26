@@ -127,7 +127,7 @@ func (s *FSServer) FSCaps() *FSCapability {
 }
 
 // well known types
-var contentTypes = map[string]string{
+var ContentTypes = map[string]string{
 	// video
 	".mp4":  "video/mp4",
 	".m4v":  "video/mp4",
@@ -152,7 +152,7 @@ var contentTypes = map[string]string{
 
 func ContentTypeByPath(s string) string {
 	ext := strings.ToLower(path.Ext(s))
-	if typ, ok := contentTypes[ext]; ok {
+	if typ, ok := ContentTypes[ext]; ok {
 		return typ
 	}
 	return mime.TypeByExtension(ext)

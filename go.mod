@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/BurntSushi/toml v1.2.1
+	github.com/binzume/cfs v0.2.0
 	github.com/binzume/fsmount v0.1.4
 	github.com/gorilla/websocket v1.5.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
