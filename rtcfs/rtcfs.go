@@ -9,5 +9,5 @@ type ConnectOptions struct {
 }
 
 func (o *ConnectOptions) DefaultRoomID() string {
-	return o.RoomID + ".1"
+	return o.RoomID
 }
