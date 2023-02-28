@@ -11,6 +11,7 @@ import (
 	"mime"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ type FileOperationRequest struct {
 	Pos   int64  `json:"p,omitempty"`
 	Len   int    `json:"l,omitempty"`
 	Buf   []byte `json:"b,omitempty"`
+
+	Options map[string]string `json:"options,omitempty"`
 }
 
 type FileOperationResult struct {
@@ -277,6 +280,54 @@ func (h *FSServer) readThumbnail(srcPath string, pos int64, len int) ([]byte, er
 	return buf[:n], nil
 }
 
+// retrun true if a < b
+func compareString(a, b string) bool {
+	la := len(a)
+	lb := len(b)
+	pa := 0
+	pb := 0
+	for pa < la && pb < lb {
+		ca := a[pa]
+		cb := b[pb]
+		if ca >= '0' && ca <= '9' && cb >= '0' && cb <= '9' {
+			na, la := readNum(a[pa:])
+			nb, lb := readNum(b[pb:])
+			if na != nb {
+				return na < nb
+			}
+			pa += la
+			pb += lb
+			continue
+		}
+		if ca >= 'a' && ca <= 'z' {
+			ca -= 'a' - 'A'
+		}
+		if cb >= 'a' && cb <= 'z' {
+			cb -= 'a' - 'A'
+		}
+		if ca != cb {
+			return ca < cb
+		}
+		pa++
+		pb++
+	}
+	return la < lb
+}
+
+func readNum(s string) (int, int) {
+	v := 0
+	l := len(s)
+	p := 0
+	for ; p < l; p++ {
+		c := s[p]
+		if c < '0' || c > '9' {
+			break
+		}
+		v = v*10 + int(c-'0')
+	}
+	return v, p
+}
+
 func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 	switch op.Op {
 	case "stat":
@@ -286,6 +337,7 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 		}
 		return NewFileEntry(stat, h.fsys.Capability().Write), nil
 	case "files":
+		// TODO: OpenDir(), ReadDirN()
 		entries, err := fs.ReadDir(h.fsys, fixPath(op.Path))
 		if err != nil {
 			return nil, err
@@ -298,9 +350,33 @@ func (h *FSServer) HanldeFileOp(op *FileOperationRequest) (any, error) {
 		if op.Len > 0 && op.Pos+int64(op.Len) < end {
 			end = op.Pos + int64(op.Len)
 		}
-		entries = entries[op.Pos:end]
-		for _, ent := range entries {
-			info, _ := ent.Info()
+		infos := make([]fs.FileInfo, len(entries))
+		for i, ent := range entries {
+			infos[i], _ = ent.Info()
+		}
+		if op.Options != nil && op.Options["sort"] != "" {
+			sortField := op.Options["sort"]
+			asc := true
+			if sortField[0] == '-' {
+				asc = false
+				sortField = sortField[1:]
+			}
+			if sortField == "updatedTime" {
+				sort.Slice(infos, func(i, j int) bool {
+					return infos[i].ModTime().Before(infos[j].ModTime()) == asc
+				})
+			} else if sortField == "size" {
+				sort.Slice(infos, func(i, j int) bool {
+					return infos[i].Size() < infos[j].Size() == asc
+				})
+			} else if sortField == "name" {
+				sort.Slice(infos, func(i, j int) bool { return compareString(infos[i].Name(), infos[j].Name()) == asc })
+			} else if sortField == "type" {
+				sort.Slice(infos, func(i, j int) bool { return path.Ext(infos[i].Name()) < path.Ext(infos[j].Name()) == asc })
+			}
+		}
+		infos = infos[op.Pos:end]
+		for _, info := range infos {
 			files = append(files, NewFileEntry(info, h.fsys.Capability().Write))
 		}
 		return files, nil
