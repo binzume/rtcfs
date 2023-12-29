@@ -17,6 +17,7 @@ type PairingOptions struct {
 	ConnectOptions
 	PairingRoomIDPrefix string
 	Timeout             time.Duration
+	DisplayName         string
 }
 
 func Pairing(ctx context.Context, options *PairingOptions) error {
@@ -47,7 +48,9 @@ func Pairing(ctx context.Context, options *PairingOptions) error {
 				"roomId":       options.RoomID,
 				"signalingKey": options.SignalingKey,
 				"token":        options.Password,
+				"name":         options.DisplayName,
 				"userAgent":    "rtcfs",
+				"services":     []string{"file", "no-client"},
 				"version":      1,
 			})
 			dc.SendText(string(j))

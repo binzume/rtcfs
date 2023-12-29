@@ -86,6 +86,7 @@ func publishFiles(ctx context.Context, config *Config, options *rtcfs.ConnectOpt
 func main() {
 	confPath := flag.String("conf", "config.toml", "conf path")
 	name := flag.String("room", "", "Room name")
+	displayName := flag.String("name", "rtcfs", "Display name(pairing)")
 	password := flag.String("passwd", "", "Connect password")
 	signalingUrl := flag.String("signalingUrl", "", "Ayame signaling url")
 	signalingKey := flag.String("signalingKey", "", "Ayame signaling key")
@@ -127,6 +128,7 @@ func main() {
 			ConnectOptions:      *options,
 			PairingRoomIDPrefix: config.PairingRoomIdPrefix,
 			Timeout:             time.Duration(config.PairingTimeoutSec) * time.Second,
+			DisplayName:         *displayName,
 		})
 		if err != nil {
 			log.Println(err)
